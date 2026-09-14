@@ -8,3 +8,15 @@ export const creditPacks = [
   { name: "Builder", price: 10, credits: 1400 },
   { name: "Studio", price: 20, credits: 3200 },
 ] as const;
+
+// Stripe sandbox Price IDs are public identifiers. Secret keys stay in hosting settings.
+export const stripePrices = {
+  starter: { monthly: "price_1UFeGEA98x23KT8UKb0v9mj9", yearly: "price_1UFeJpA98x23KT8UuMBI33Xa" },
+  creator: { monthly: "price_1UFeKVA98x23KT8UoyqRdstJ", yearly: "price_1UFeKrA98x23KT8U47QdRTL7" },
+  pro: { monthly: "price_1UFeLMA98x23KT8UoKFfC8Fs", yearly: "price_1UFeLeA98x23KT8U3zcuiV0A" },
+  packs: {
+    Small: "price_1UFeMQA98x23KT8UQdK4S8l2",
+    Builder: "price_1UFeMkA98x23KT8Un4x858AT",
+    Studio: "price_1UFeN2A98x23KT8U0r0X95Kr",
+  },
+} as const;

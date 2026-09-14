@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
 import { LEGAL_VERSION } from "../lib/spark/legal.ts";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { handle, providerError, callOpenAI } from "../lib/spark/core.ts";
 const sqlite = new DatabaseSync(":memory:");
 sqlite.exec("PRAGMA foreign_keys=ON");
@@ -114,6 +115,22 @@ const consent = sqlite.prepare("SELECT legal_version,legal_accepted_at FROM user
 check(consent.legal_version === LEGAL_VERSION && consent.legal_accepted_at > 0, "Acceptance version and timestamp persist");
 check((await request("projects", "GET", undefined, a.cookie)).status === 402, "Unpaid account cannot read workspace API");
 check((await request("projects", "POST", { name: "Bypass", workspace_enabled: 1 }, a.cookie)).status === 402, "Client cannot grant itself workspace access");
+env.STRIPE_SECRET_KEY = "sk_test_fixture";
+let stripeBody = "";
+const stripeCheckout = await request("billing/checkout", "POST", { kind: "plan", planId: "starter", period: "yearly" }, a.cookie, async (url, options) => {
+  assert.equal(url, "https://api.stripe.com/v1/checkout/sessions");
+  stripeBody = options.body;
+  return Response.json({ url: "https://checkout.stripe.test/session" });
+});
+check(stripeCheckout.data.url === "https://checkout.stripe.test/session" && new URLSearchParams(stripeBody).get("line_items[0][price]") === "price_1UFeJpA98x23KT8UuMBI33Xa", "Checkout uses the server-owned annual Starter Price ID");
+env.STRIPE_WEBHOOK_SECRET = "whsec_fixture";
+const webhookPayload = JSON.stringify({ id: "evt_pack_fixture", type: "checkout.session.completed", data: { object: { id: "cs_fixture", mode: "payment", payment_status: "paid", payment_intent: "pi_fixture", metadata: { user_id: b.data.user.id, credits: "600", pack_name: "Small" } } } });
+const webhookTimestamp = Math.floor(Date.now() / 1000);
+const webhookSignature = createHmac("sha256", env.STRIPE_WEBHOOK_SECRET).update(`${webhookTimestamp}.${webhookPayload}`).digest("hex");
+const webhookRequest = () => handle(new Request("https://spark.test/api/stripe/webhook", { method: "POST", headers: { "Content-Type": "application/json", "stripe-signature": `t=${webhookTimestamp},v1=${webhookSignature}` }, body: webhookPayload }), env, fake);
+check((await webhookRequest()).status === 200 && sqlite.prepare("SELECT workspace_enabled FROM users WHERE id=?").get(b.data.user.id).workspace_enabled === 1, "Verified Stripe payment unlocks the account");
+await webhookRequest();
+check(sqlite.prepare("SELECT COUNT(*) AS count FROM credit_ledger WHERE user_id=?").get(b.data.user.id).count === 1, "Duplicate Stripe events do not duplicate credits");
 // Only this isolated test database provisions access for the existing workspace suite.
 sqlite.prepare("UPDATE users SET workspace_enabled=1").run();
 check(

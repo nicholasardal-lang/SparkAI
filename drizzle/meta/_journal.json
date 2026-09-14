@@ -15,6 +15,13 @@
       "when": 1789365782865,
       "tag": "0001_acoustic_nightmare",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789400000000,
+      "tag": "0002_stripe_billing",
+      "breakpoints": true
     }
   ]
 }

@@ -6,10 +6,11 @@ import { plans, creditPacks } from "@/lib/spark/plans";
 import { api } from "./auth-form";
 export default function PlansView({ signedIn = false }: { signedIn?: boolean }) {
   const [yearly, setYearly] = useState(false);
-  const [selection, setSelection] = useState<{ title: string; price: number; details: string; planId?: string } | null>(null);
+  const [selection, setSelection] = useState<{ title: string; price: number; details: string; planId?: string; packName?: string } | null>(null);
   const selectedPlan = plans.find(plan => plan.id === selection?.planId);
   const checkoutPrice = selectedPlan ? (yearly ? selectedPlan.yearly : selectedPlan.monthly) : selection?.price;
   const [error, setError] = useState("");
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
   return <main className="plans-page">
     <nav className="plans-nav"><a className="brand" href="/"><span className="logo-mark" aria-hidden="true">✦</span><span>Spark</span></a>{signedIn ? <button onClick={async () => { try { await api("auth/logout", "POST", {}); location.assign("/"); } catch { setError("Could not log out. Please try again."); } }}>Log out</button> : <a href="/login">Log in</a>}</nav>
     <header className="plans-heading"><span className="pill">YOUR NEXT CHAPTER</span><h1>Give your ideas room to <span>grow.</span></h1><p>{signedIn ? "Your account is ready. Choose a plan or add credits to unlock Spark." : "Choose the right amount of Spark for the way you build."}</p></header>
@@ -22,17 +23,29 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
       <ul>{["Game planning and Luau scripting", "Debugging and code explanations", "Saved projects and conversations", "Optional credit top-ups"].map(feature => <li key={feature}><Check size={16}/>{feature}</li>)}</ul>
       <button className="button" onClick={() => signedIn ? setSelection({ planId: plan.id, title: `Spark ${plan.name}`, price: plan.monthly, details: `${plan.credits.toLocaleString("en-US")} credits issued each month` }) : location.assign("/signup")}>Choose {plan.name}</button>
     </article>)}</div>
-    <section id="credits" className="topups"><div><h2>A little extra spark.</h2><p>Prefer to start with credits? Buy a pack without a subscription, or top up your plan.</p></div><div className="topup-grid">{creditPacks.map(pack => <button key={pack.name} className="topup-card" onClick={() => signedIn ? setSelection({ title: `${pack.name} credit pack`, price: pack.price, details: `${pack.credits.toLocaleString("en-US")} Spark Credits · one-time purchase` }) : location.assign("/signup")}><span>{pack.name}</span><strong>{pack.credits.toLocaleString("en-US")} <small>credits</small></strong><span>${pack.price} <span aria-hidden="true">↗</span></span></button>)}</div></section>
-    <section className="credit-explainer"><h2>Small question. Big build. Credits follow the work.</h2><p>Requests use Spark Credits based on the AI resources they consume. Longer requests, larger conversations, and more involved responses can use more credits. Spark Credits are separate from OpenAI tokens.</p><p>Plan credits refresh monthly, including on yearly plans. Unused plan credits expire at renewal. Purchased credits roll over and do not require an active subscription.</p><p className="notice">Payments are coming soon. These options preview our planned offers; checkout is unavailable and selecting one will not charge you or unlock access. Credit usage rates will be shown before purchases open.</p></section>
+    <section id="credits" className="topups"><div><h2>A little extra spark.</h2><p>Prefer to start with credits? Buy a pack without a subscription, or top up your plan.</p></div><div className="topup-grid">{creditPacks.map(pack => <button key={pack.name} className="topup-card" onClick={() => signedIn ? setSelection({ packName: pack.name, title: `${pack.name} credit pack`, price: pack.price, details: `${pack.credits.toLocaleString("en-US")} Spark Credits · one-time purchase` }) : location.assign("/signup")}><span>{pack.name}</span><strong>{pack.credits.toLocaleString("en-US")} <small>credits</small></strong><span>${pack.price} <span aria-hidden="true">↗</span></span></button>)}</div></section>
+    <section className="credit-explainer"><h2>Small question. Big build. Credits follow the work.</h2><p>Requests use Spark Credits based on the AI resources they consume. Longer requests, larger conversations, and more involved responses can use more credits. Spark Credits are separate from OpenAI tokens.</p><p>Plan credits refresh monthly, including on yearly plans. Unused plan credits expire at renewal. Purchased credits roll over and do not require an active subscription.</p><p className="notice">Stripe sandbox checkout is being connected. Sandbox payments are tests and do not move real money. Credit usage rates will be shown before live purchases open.</p></section>
     {error && <p className="error" role="alert">{error}</p>}
     <div className="legal-footer"><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a><span>Prices in USD.</span></div>
-    <Dialog open={!!selection} onOpenChange={open => { if (!open) setSelection(null); }}><DialogContent className="checkout-preview"><DialogTitle>{selection?.title}</DialogTitle><DialogDescription>{selection?.details}</DialogDescription>
+    <Dialog open={!!selection} onOpenChange={open => { if (!open) { setSelection(null); setError(""); } }}><DialogContent className="checkout-preview"><DialogTitle>{selection?.title}</DialogTitle><DialogDescription>{selection?.details}</DialogDescription>
       {selectedPlan && <div className="checkout-billing" role="group" aria-label="Checkout billing frequency">
         <button aria-pressed={!yearly} onClick={() => setYearly(false)}><strong>Monthly</strong><span>${selectedPlan.monthly} billed every month</span></button>
         <button aria-pressed={yearly} onClick={() => setYearly(true)}><strong>Annual <span className="annual-saving">Save ${selectedPlan.monthly * 12 - selectedPlan.yearly}</span></strong><span><s>${selectedPlan.monthly * 12}</s> ${selectedPlan.yearly} billed once a year</span><span>${(selectedPlan.yearly / 12).toLocaleString("en-US", { maximumFractionDigits: 2 })}/month equivalent</span></button>
       </div>}
       <div className="checkout-total"><span>{selectedPlan ? (yearly ? "Annual total" : "Monthly total") : "One-time total"}</span><strong>${checkoutPrice}</strong></div>
       {selectedPlan && yearly && <p className="annual-saving">Save ${selectedPlan.monthly * 12 - selectedPlan.yearly} compared with 12 monthly payments. Credits still arrive monthly.</p>}
-      <p>Checkout is not available yet. No payment has been taken and no credits or subscription have been activated.</p><button className="button" disabled>Payments coming soon</button><button onClick={() => setSelection(null)}>Back to options</button></DialogContent></Dialog>
+      <p>Stripe opens a secure checkout page. Spark unlocks only after Stripe confirms the sandbox payment.</p>
+      {error && <p className="error" role="alert">{error}</p>}
+      <button className="button" disabled={checkoutBusy} onClick={async () => {
+        if (!selection) return;
+        setCheckoutBusy(true); setError("");
+        try {
+          const result = await api("billing/checkout", "POST", selectedPlan
+            ? { kind: "plan", planId: selectedPlan.id, period: yearly ? "yearly" : "monthly" }
+            : { kind: "pack", packName: selection.packName });
+          location.assign(result.url);
+        } catch (e: any) { setError(e.message); setCheckoutBusy(false); }
+      }}>{checkoutBusy ? "Opening Stripe…" : "Continue to secure checkout"}</button>
+      <button onClick={() => setSelection(null)}>Back to options</button></DialogContent></Dialog>
   </main>;
 }

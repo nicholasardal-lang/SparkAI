@@ -1,4 +1,5 @@
 import { LEGAL_VERSION } from "./legal.ts";
+import { plans, creditPacks, stripePrices } from "./plans.ts";
 export type DB = {
   prepare(sql: string): any;
   batch(statements: any[]): Promise<any>;
@@ -9,6 +10,8 @@ export type Runtime = {
   OPENAI_MODEL?: string;
   DAILY_MESSAGE_LIMIT?: string;
   AI_MAX_OUTPUT_TOKENS?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
 };
 const encoder = new TextEncoder();
 export class ApiError extends Error {
@@ -60,6 +63,28 @@ function equal(a: string, b: string) {
   for (let i = 0; i < Math.max(a.length, b.length); i++)
     diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
   return diff === 0;
+}
+function bytesToHex(bytes: ArrayBuffer) {
+  return Array.from(new Uint8Array(bytes), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function verifyStripeSignature(payload: string, header: string, secret: string) {
+  const parts = Object.fromEntries(header.split(",").map((part) => part.split("=", 2)));
+  const timestamp = Number(parts.t);
+  if (!timestamp || Math.abs(Date.now() / 1000 - timestamp) > 300 || !parts.v1) return false;
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = bytesToHex(await crypto.subtle.sign("HMAC", key, encoder.encode(`${timestamp}.${payload}`)));
+  return equal(signature, parts.v1);
+}
+async function stripeRequest(env: Runtime, params: URLSearchParams, fetcher: typeof fetch) {
+  if (!env.STRIPE_SECRET_KEY) fail(503, "PAYMENTS_SETUP_REQUIRED", "Payments are still being connected. Please try again later.");
+  const response = await fetcher("https://api.stripe.com/v1/checkout/sessions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  const data: any = await response.json().catch(() => ({}));
+  if (!response.ok || !data.url) fail(502, "CHECKOUT_UNAVAILABLE", "Stripe checkout could not be started. Please try again.");
+  return data.url as string;
 }
 export async function userFor(cookie: string, db: DB) {
   const token = cookie.match(/(?:^|;\s*)spark_session=([a-f0-9-]+)/)?.[1];
@@ -263,6 +288,41 @@ export async function handle(
     const url = new URL(req.url);
     const path = url.pathname.replace(/^\/api\/?/, "").split("/");
     const method = req.method;
+    if (path[0] === "stripe" && path[1] === "webhook" && method === "POST") {
+      if (!env.STRIPE_WEBHOOK_SECRET) fail(503, "PAYMENTS_SETUP_REQUIRED", "Stripe webhook is not configured.");
+      const payload = await req.text();
+      if (!(await verifyStripeSignature(payload, req.headers.get("stripe-signature") || "", env.STRIPE_WEBHOOK_SECRET)))
+        fail(400, "INVALID_SIGNATURE", "Invalid Stripe signature.");
+      const event = JSON.parse(payload);
+      const claimed = await db.prepare("INSERT INTO stripe_events (id,event_type,processed_at) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING RETURNING id").bind(event.id, event.type, Date.now()).first();
+      if (!claimed) return json({ received: true, duplicate: true });
+      const object = event.data?.object || {};
+      const metadata = object.metadata || {};
+      const userId = metadata.user_id;
+      if (event.type === "checkout.session.completed" && userId && object.payment_status === "paid") {
+        if (object.mode === "subscription") {
+          await db.batch([
+            db.prepare("INSERT INTO billing_accounts (user_id,stripe_customer_id,stripe_subscription_id,plan_id,billing_period,subscription_status,updated_at) VALUES (?,?,?,?,?,'active',?) ON CONFLICT(user_id) DO UPDATE SET stripe_customer_id=excluded.stripe_customer_id,stripe_subscription_id=excluded.stripe_subscription_id,plan_id=excluded.plan_id,billing_period=excluded.billing_period,subscription_status='active',updated_at=excluded.updated_at").bind(userId, object.customer, object.subscription, metadata.plan_id, metadata.billing_period, Date.now()),
+            db.prepare("UPDATE users SET workspace_enabled=1 WHERE id=?").bind(userId),
+          ]);
+        } else if (object.mode === "payment") {
+          const credits = Number(metadata.credits);
+          if (Number.isInteger(credits) && credits > 0) await db.batch([
+            db.prepare("INSERT INTO credit_ledger (id,user_id,amount,source,stripe_reference,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(stripe_reference) DO NOTHING").bind(crypto.randomUUID(), userId, credits, "credit_pack", object.payment_intent || object.id, Date.now()),
+            db.prepare("UPDATE users SET workspace_enabled=1 WHERE id=?").bind(userId),
+          ]);
+        }
+      }
+      if (["customer.subscription.updated", "customer.subscription.deleted"].includes(event.type) && userId) {
+        const active = ["active", "trialing"].includes(object.status);
+        await db.prepare("UPDATE billing_accounts SET subscription_status=?,updated_at=? WHERE user_id=?").bind(object.status, Date.now(), userId).run();
+        if (!active) {
+          const balance = await db.prepare("SELECT COALESCE(SUM(amount),0) AS balance FROM credit_ledger WHERE user_id=?").bind(userId).first();
+          if (Number(balance?.balance || 0) <= 0) await db.prepare("UPDATE users SET workspace_enabled=0 WHERE id=?").bind(userId).run();
+        }
+      }
+      return json({ received: true });
+    }
     if (!["GET", "HEAD"].includes(method)) {
       const origin = req.headers.get("origin");
       if (!origin || origin !== url.origin)
@@ -346,6 +406,36 @@ export async function handle(
     }
     if (path[0] === "me" && method === "GET")
       return json({ user, aiConfigured: !!env.OPENAI_API_KEY });
+    if (path[0] === "billing" && path[1] === "checkout" && method === "POST") {
+      const b = await body(req);
+      const params = new URLSearchParams({
+        "line_items[0][quantity]": "1",
+        customer_email: user.email,
+        client_reference_id: user.id,
+        success_url: `${url.origin}/upgrade?checkout=success`,
+        cancel_url: `${url.origin}/upgrade?checkout=cancelled`,
+        "metadata[user_id]": user.id,
+      });
+      if (b.kind === "plan") {
+        const plan = plans.find((item) => item.id === b.planId);
+        const period = b.period === "yearly" ? "yearly" : "monthly";
+        if (!plan) fail(400, "INVALID_PLAN", "Choose a valid plan.");
+        params.set("mode", "subscription");
+        params.set("line_items[0][price]", stripePrices[plan.id][period]);
+        params.set("metadata[plan_id]", plan.id);
+        params.set("metadata[billing_period]", period);
+        params.set("subscription_data[metadata][user_id]", user.id);
+        params.set("subscription_data[metadata][plan_id]", plan.id);
+      } else if (b.kind === "pack") {
+        const pack = creditPacks.find((item) => item.name === b.packName);
+        if (!pack) fail(400, "INVALID_PACK", "Choose a valid credit pack.");
+        params.set("mode", "payment");
+        params.set("line_items[0][price]", stripePrices.packs[pack.name]);
+        params.set("metadata[credits]", String(pack.credits));
+        params.set("metadata[pack_name]", pack.name);
+      } else fail(400, "INVALID_CHECKOUT", "Choose a valid checkout option.");
+      return json({ url: await stripeRequest(env, params, fetcher) });
+    }
     // Preview access is closed until verified payment provisioning is connected.
     // There is intentionally no browser/API endpoint that grants this flag.
     if (path[0] === "projects" && user.workspace_enabled !== 1)
