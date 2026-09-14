@@ -6,7 +6,7 @@ Spark is a working web app for planning Roblox games, generating Luau scripts, a
 
 Spark is publicly available at https://spark-roblox-creative-workspace.puriux.chatgpt.site. It has its own email/password accounts. Test accounts and the local test database are not deployed. See [Working on Spark](docs/WORKING-ON-SPARK.md) for using the shared GitHub project on Mac and PC.
 
-Click **Get started**, create an account with an email address and a password of at least 12 characters, create a project, and send a message. Without an AI key, the message is saved and the app displays **AI setup required**. Refreshing the page restores the conversation.
+Click **Get started**, create an account with an email address and a password of at least 12 characters, and accept the Terms and Privacy drafts. New accounts go to plan selection. Checkout is a visual preview and remains disabled until Stripe is connected; selecting a plan does not unlock the workspace. OpenAI billing and a hosted API key are also needed for AI requests. See [Payment preview](docs/PAYMENTS-PREVIEW.md) for the remaining integration work.
 
 ## Enable OpenAI safely
 
