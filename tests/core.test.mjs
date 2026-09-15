@@ -366,4 +366,24 @@ check(!state.active&&state.credits===600,'Expiry removes plan access and preserv
 sqlite.prepare('UPDATE credit_buckets SET remaining=0 WHERE user_id=?').run(owner);
 await assert.rejects(()=>reserve(DB,owner,'empty_fixture',1));
 check((await balance(billingEnv,owner,billingFetch)).credits===0,'Exhausted credits cannot be spent');
+const pictures = new Map();
+env.BUCKET = {
+  async put(key, bytes) { pictures.set(key, bytes.slice()); },
+  async get(key) { return pictures.has(key) ? {body:pictures.get(key)} : null; },
+  async delete(key) { pictures.delete(key); },
+};
+async function pictureRequest(method, bytes, cookie=b.cookie, origin="https://spark.test") {
+  return handle(new Request("https://spark.test/api/profile/avatar", {method,headers:{Origin:origin,Cookie:cookie,"Content-Type":"image/png"},...(bytes?{body:bytes}:{})}),env,fake);
+}
+const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aK1cAAAAASUVORK5CYII=","base64");
+check((await pictureRequest("PUT",png,"")).status===401,"Avatar uploads require a signed-in account");
+check((await pictureRequest("PUT",png,b.cookie,"https://evil.test")).status===403,"Avatar upload rejects a foreign origin");
+check((await pictureRequest("PUT",new TextEncoder().encode("<svg/>"))).status===400,"Avatar upload rejects non-PNG content");
+check((await pictureRequest("PUT",new Uint8Array(300001))).status===413,"Avatar upload enforces a bounded size");
+check((await pictureRequest("PUT",png)).status===200,"Avatar upload saves a valid picture");
+const picture=await pictureRequest("GET");
+check(picture.status===200 && Buffer.from(await picture.arrayBuffer()).equals(png),"Uploaded avatar persists and reloads");
+const otherLogin=await request("auth/login","POST",{email:"one@example.test",password:"test-password-one"});
+check((await pictureRequest("GET",undefined,otherLogin.cookie)).status===404,"Other accounts cannot read another user's avatar");
+check((await pictureRequest("DELETE")).status===200 && (await pictureRequest("GET")).status===404,"Removing a picture restores the default avatar");
 console.log(`${checks} total checks passed.`);

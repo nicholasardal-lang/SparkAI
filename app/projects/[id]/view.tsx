@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "../../auth-form";
+import ProjectActions from "../../project-actions";
 import { readIdea, clearIdea } from "@/lib/spark/draft";
 const prompts = [
   "Help me plan an obby.",
@@ -188,13 +189,14 @@ export default function Workspace({ id }: { id: string }) {
               YOUR PROJECTS
             </p>
             {projects.map((p) => (
+              <div key={p.id} className={"sidebar-project-row " + (p.id === id ? "selected" : "")}>
               <a
-                key={p.id}
-                className={p.id === id ? "selected" : ""}
                 href={"/projects/" + p.id}
               >
                 {p.name}
               </a>
+              <ProjectActions project={p} current={p.id === id} onChanged={async()=>{setProjects((await api("projects")).projects);await load();}}/>
+              </div>
             ))}
           </div>
         </SidebarContent>

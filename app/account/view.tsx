@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import AccountMenu from "../account-menu";
+import ProfileAvatar from "../profile-avatar";
+import AvatarUpload from "../avatar-upload";
 import { api } from "../auth-form";
 
 type Transaction = { id: string; amount: number; source: string; created_at: number; stripe_reference?: string };
@@ -59,7 +61,8 @@ export default function AccountView({ user }: { user: any }) {
       <section className="account-panel">
         {(tab === "profile" || tab === "settings") && <form onSubmit={e => save(e, "profile", { avatarColor: color })}>
           <h2>{tab === "profile" ? "Make it yours" : "Appearance"}</h2>
-          <span className={"profile-avatar avatar-large " + color}>{user.username?.slice(0, 2).toUpperCase() || "✦"}</span>
+          <ProfileAvatar username={user.username} color={color} large />
+          <AvatarUpload />
           <label htmlFor="profile-name">Username</label><input id="profile-name" name="username" defaultValue={user.username || ""} required minLength={3} maxLength={24} pattern="[a-zA-Z0-9_]+" />
           <p className="muted">Your email stays private: {user.email}</p>
           <label>Avatar color</label><div className="avatar-colors">{["violet", "blue", "rose", "green", "amber"].map(c => <button type="button" key={c} className={"profile-avatar " + c} aria-label={c} aria-pressed={color === c} onClick={() => setColor(c)}>{color === c ? "✓" : "✦"}</button>)}</div>

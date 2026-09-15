@@ -7,6 +7,7 @@ export type DB = {
 };
 export type Runtime = {
   DB: DB;
+  BUCKET?: R2Bucket;
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
   DAILY_MESSAGE_LIMIT?: string;
@@ -483,6 +484,38 @@ export async function handle(
       return json({ok:true});
     }
     const user = await requireUser(req, db);
+    if (path[0] === "profile" && path[1] === "avatar") {
+      if (!env.BUCKET) fail(503, "STORAGE_UNAVAILABLE", "Picture storage is unavailable. Please try again later.");
+      const key = `avatars/${user.id}.png`;
+      if (method === "GET") {
+        const picture = await env.BUCKET.get(key);
+        if (!picture) return new Response(null, { status: 404 });
+        return new Response(picture.body, { headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" } });
+      }
+      if (method === "PUT" || method === "DELETE") {
+        if (!(await consume(db, `avatar:${user.id}:${Math.floor(Date.now()/600000)}`, 20))) fail(429,"RATE_LIMIT","Please wait a few minutes before changing your picture again.");
+        if (method === "DELETE") { await env.BUCKET.delete(key); return json({ ok: true }); }
+        if (req.headers.get("content-type") !== "image/png") fail(415,"INVALID_IMAGE","Choose a PNG, JPEG, or WebP picture using the upload button.");
+        const reader = req.body?.getReader();
+        if (!reader) fail(400,"INVALID_IMAGE","Choose a picture first.");
+        const chunks: Uint8Array[] = []; let length = 0;
+        while (true) {
+          const { done, value } = await reader.read(); if (done) break;
+          length += value.length;
+          if (length > 300000) { await reader.cancel(); fail(413,"IMAGE_TOO_LARGE","This picture is too large. Choose a smaller picture."); }
+          chunks.push(value);
+        }
+        const bytes = new Uint8Array(length); let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+        const signature = [137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82];
+        if (length < 33 || !signature.every((v,i) => bytes[i] === v)) fail(400,"INVALID_IMAGE","That file is not a supported picture.");
+        const view = new DataView(bytes.buffer), width = view.getUint32(16), height = view.getUint32(20);
+        if (!width || !height || width > 256 || height > 256) fail(400,"INVALID_IMAGE","Use the upload button to resize your picture first.");
+        await env.BUCKET.put(key, bytes, { httpMetadata: { contentType: "image/png" } });
+        return json({ ok: true });
+      }
+      fail(405,"METHOD_NOT_ALLOWED","Unsupported picture action.");
+    }
     if (path[0] === "profile" && method === "PATCH") {
       const b = await body(req);
       const username = string(b.username, 24, "Username", 3);
