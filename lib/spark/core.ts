@@ -473,15 +473,44 @@ export async function handle(
     }
     if(path[0]==="auth"&&path[1]==="forgot-password"&&method==="POST"){
       const b=await body(req);const email=string(b.email,254,"Email").toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400,"INVALID_EMAIL","Enter a valid email address.");
+      const window = Math.floor(Date.now()/600000);
+      const ip = req.headers.get("cf-connecting-ip") || "local";
+      if (!(await consume(db,`recovery-ip:${await hash(ip)}:${window}`,30)) || !(await consume(db,`recovery-email:${await hash(email)}:${window}`,3)))
+        fail(429,"AUTH_LIMIT","Too many requests. Try again in 10 minutes.");
+      let origin: URL;
+      try {
+        origin = new URL(env.APP_ORIGIN || "");
+        if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["localhost","127.0.0.1"].includes(origin.hostname))) throw new Error();
+        if (origin.username || origin.password) throw new Error();
+      } catch { fail(503,"EMAIL_UNAVAILABLE","Email delivery is temporarily unavailable. Please try again later."); }
+      if (!env.RESEND_API_KEY || !env.EMAIL_FROM) fail(503,"EMAIL_UNAVAILABLE","Email delivery is temporarily unavailable. Please try again later.");
       const target=await db.prepare("SELECT id,email FROM users WHERE email=?").bind(email).first();
-      let sent=false;if(target){const token=await issueAuthToken(db,target.id,"password_reset");sent=await deliverEmail(env,target.email,"Reset your Spark password",`<p>Reset your Spark password:</p><p><a href="${env.APP_ORIGIN||url.origin}/reset-password?token=${encodeURIComponent(token)}">Reset my password</a></p><p>This link expires in one hour.</p>`,fetcher);}
-      return json({ok:true,sent});
+      if(target){
+        const token=await issueAuthToken(db,target.id,"password_reset");
+        const sent=await deliverEmail(env,target.email,"Reset your Spark password",`<p>Reset your Spark password:</p><p><a href="${origin.origin}/reset-password#token=${encodeURIComponent(token)}">Reset my password</a></p><p>This link expires in one hour. If you did not request this, you can ignore this email.</p>`,fetcher);
+        if (!sent) {
+          await db.prepare("DELETE FROM auth_tokens WHERE token_hash=?").bind(await hash(token)).run();
+          console.error("Spark password reset email delivery failed");
+        }
+      }
+      return json({ok:true});
     }
     if(path[0]==="auth"&&path[1]==="reset-password"&&method==="POST"){
-      const b=await body(req);const token=authTokenFrom(b.token);const row=await consumeAuthToken(db,token,"password_reset");
+      const b=await body(req);const token=authTokenFrom(b.token);
+      const ip=req.headers.get("cf-connecting-ip") || "local";
+      if (!(await consume(db,`reset-ip:${await hash(ip)}:${Math.floor(Date.now()/600000)}`,30))) fail(429,"AUTH_LIMIT","Too many requests. Try again in 10 minutes.");
       const next=string(b.password,128,"Password",12),salt=crypto.randomUUID();
-      await db.batch([db.prepare("UPDATE users SET password=?,salt=?,email_verified_at=COALESCE(email_verified_at,?),email_verification_required=0 WHERE id=?").bind(await passwordHash(next,salt),salt,Date.now(),row.user_id),db.prepare("DELETE FROM sessions WHERE user_id=?").bind(row.user_id)]);
-      return json({ok:true});
+      const digest=await hash(token), password=await passwordHash(next,salt), now=Date.now();
+      const owner="SELECT user_id FROM auth_tokens WHERE token_hash=? AND purpose='password_reset' AND used_at IS NULL AND expires>?";
+      // Token validation, password replacement, and revocation share one transaction.
+      const results=await db.batch([
+        db.prepare(`UPDATE users SET password=?,salt=?,email_verified_at=COALESCE(email_verified_at,?),email_verification_required=0 WHERE id IN (${owner})`).bind(password,salt,now,digest,now),
+        db.prepare(`DELETE FROM sessions WHERE user_id IN (${owner})`).bind(digest,now),
+        db.prepare(`UPDATE auth_tokens SET used_at=? WHERE user_id IN (${owner}) AND used_at IS NULL`).bind(now,digest,now),
+      ]);
+      if (!(results[0]?.meta?.changes ?? results[0]?.changes)) fail(400,"INVALID_TOKEN","That password reset link is invalid or expired.");
+      return json({ok:true},200,{"Set-Cookie":`spark_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${url.protocol === "https:" ? "; Secure" : ""}`});
     }
     const user = await requireUser(req, db);
     if (path[0] === "profile" && path[1] === "avatar") {
@@ -533,7 +562,7 @@ export async function handle(
       if (!equal(await passwordHash(current,record.salt),record.password)) fail(400,"INVALID_PASSWORD","Your current password is incorrect.");
       if (b.action === "password") {
         const next = string(b.newPassword,128,"New password",12), salt = crypto.randomUUID();
-        await db.batch([db.prepare("UPDATE users SET password=?,salt=? WHERE id=?").bind(await passwordHash(next,salt),salt,user.id),db.prepare("DELETE FROM sessions WHERE user_id=?").bind(user.id)]);
+        await db.batch([db.prepare("UPDATE users SET password=?,salt=? WHERE id=?").bind(await passwordHash(next,salt),salt,user.id),db.prepare("DELETE FROM sessions WHERE user_id=?").bind(user.id),db.prepare("UPDATE auth_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL").bind(Date.now(),user.id)]);
       } else if (b.action === "sessions") {
         const token = req.headers.get("cookie")?.match(/(?:^|;\s*)spark_session=([a-f0-9-]+)/)?.[1] || "";
         await db.prepare("DELETE FROM sessions WHERE user_id=? AND token<>?").bind(user.id,await hash(token)).run();

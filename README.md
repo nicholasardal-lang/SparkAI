@@ -58,7 +58,10 @@ Password recovery and email verification use short-lived, single-use, hashed tok
 
 ## Checks
 
+Password reset uses the existing `0006_auth_tokens.sql` migration; no additional migration is needed. Apply outstanding migrations in order before running this version. Set `RESEND_API_KEY`, `EMAIL_FROM` (a verified sender), and `APP_ORIGIN` (the canonical HTTPS origin; HTTP localhost is allowed for development) to enable reset emails. Missing configuration returns a temporary-unavailability error. Reset links expire after one hour. Requests return the same response for registered and unknown addresses, and are rate limited. Failed delivery is logged without addresses or tokens. Resetting a password revokes all sessions and outstanding account tokens atomically, while retaining the existing email-verification behavior. Previously issued query-string links still work; new links use fragments to keep tokens out of server request logs.
+
 ```sh
+node tests/email-auth.test.mjs
 node tests/core.test.mjs
 npx tsc --noEmit
 npm run build
