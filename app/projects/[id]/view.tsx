@@ -1,4 +1,5 @@
 "use client";
+import { LogoMark } from "@/components/brand";
 import { useEffect, useRef, useState } from "react";
 import { Code2, ArrowUp, Plus } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -170,7 +171,7 @@ export default function Workspace({ id }: { id: string }) {
       <Sidebar>
         <SidebarHeader className="p-6">
           <a className="brand" href="/dashboard">
-            ✦ <span>Spark</span>
+            <LogoMark /> <span>Spark</span>
           </a>
         </SidebarHeader>
         <SidebarContent>
@@ -231,7 +232,7 @@ export default function Workspace({ id }: { id: string }) {
             </div>
           ) : !data.messages.length ? (
             <div className="welcome">
-              <span className="spark-avatar">✦</span>
+              <span className="spark-avatar"><LogoMark /></span>
               <h2>What will you create?</h2>
               <p>
                 A new world, a clever mechanic, or your very first script.
@@ -257,7 +258,7 @@ export default function Workspace({ id }: { id: string }) {
               <article className={"message " + m.role} key={m.id}>
                 {m.role === "assistant" ? (
                   <>
-                    <b>✦ Spark</b>
+                    <b><LogoMark /> Spark</b>
                     <Markdown text={m.content} />
                   </>
                 ) : (
@@ -268,7 +269,7 @@ export default function Workspace({ id }: { id: string }) {
           )}
           {busy && (
             <p className="muted" role="status">
-              ✦ Spark is working on your idea…
+              <LogoMark /> Spark is working on your idea…
             </p>
           )}
           <div ref={end} />

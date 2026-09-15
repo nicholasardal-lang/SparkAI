@@ -1,4 +1,5 @@
 "use client";
+import { LogoMark } from "@/components/brand";
 import { useEffect, useState } from "react";
 import { Plus, Folder, ArrowUpRight } from "lucide-react";
 import {
@@ -79,7 +80,7 @@ export default function Dashboard({ billing }: { billing: any }) {
     <>
       <nav className="nav">
         <a className="brand" href="/">
-          ✦ <span>Spark</span>
+          <LogoMark /> <span>Spark</span>
         </a>
         <AccountMenu/>
       </nav>
@@ -139,7 +140,7 @@ export default function Dashboard({ billing }: { billing: any }) {
           </div>
         ) : (
           <div className="empty-state">
-            <span className="spark-avatar">✦</span>
+            <span className="spark-avatar"><LogoMark /></span>
             <h2>A blank canvas. A big possibility.</h2>
             <p>
               Create your first project to start planning, scripting, and

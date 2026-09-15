@@ -1,4 +1,5 @@
 "use client";
+import { LogoMark } from "@/components/brand";
 import { useState } from "react";
 import GameInspiration from "./game-inspiration";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -29,7 +30,7 @@ export default function AuthForm({ signup = false }: { signup?: boolean }) {
     <main className={signup ? "auth-layout" : "login-layout"}>
     <section className="auth-card">
       <a className="brand" href="/">
-        <span className="logo-mark" aria-hidden="true">✦</span><span>Spark</span>
+        <LogoMark /><span>Spark</span>
       </a>
       <h1>{signup ? "Your next idea starts here." : "Welcome back."}</h1>
       <p>
