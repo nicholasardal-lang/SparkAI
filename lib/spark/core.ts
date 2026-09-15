@@ -361,8 +361,18 @@ export async function handle(
       }
       if (["invoice.paid","invoice.payment_failed"].includes(event.type)) {
         const subId=object.subscription || object.parent?.subscription_details?.subscription;
-        if(subId){const account=await db.prepare("SELECT user_id FROM billing_accounts WHERE stripe_subscription_id=?").bind(subId).first();
-          if(account)await syncSubscription(env,account.user_id,subId,fetcher);}
+        if(subId){
+          const account=await db.prepare("SELECT user_id FROM billing_accounts WHERE stripe_subscription_id=?").bind(subId).first();
+          if(account) await syncSubscription(env,account.user_id,subId,fetcher);
+          else {
+            // Events can arrive out of order. Recover the owner from the
+            // subscription metadata when checkout has not been recorded yet.
+            try {
+              const subscription=await stripe(env,`subscriptions/${encodeURIComponent(subId)}`,fetcher);
+              if(subscription.metadata?.user_id) await syncSubscription(env,subscription.metadata.user_id,subId,fetcher);
+            } catch { /* A later checkout/subscription event can reconcile this invoice. */ }
+          }
+        }
       }
       await db.prepare("INSERT INTO stripe_events(id,event_type,processed_at) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING").bind(event.id,event.type,Date.now()).run();
       return json({ received: true });
