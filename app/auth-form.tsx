@@ -1,5 +1,4 @@
 "use client";
-import { LogoMark } from "@/components/brand";
 import { useState } from "react";
 import GameInspiration from "./game-inspiration";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -30,7 +29,7 @@ export default function AuthForm({ signup = false }: { signup?: boolean }) {
     <main className={signup ? "auth-layout" : "login-layout"}>
     <section className="auth-card">
       <a className="brand" href="/">
-        <LogoMark /><span>Spark</span>
+        <span className="logo-mark" aria-hidden="true">✦</span><span>Spark</span>
       </a>
       <h1>{signup ? "Your next idea starts here." : "Welcome back."}</h1>
       <p>
@@ -47,14 +46,15 @@ export default function AuthForm({ signup = false }: { signup?: boolean }) {
           setError("");
           const data = new FormData(e.currentTarget);
           try {
-            await api("auth/" + (signup ? "signup" : "login"), "POST", {
+            const result=await api("auth/" + (signup ? "signup" : "login"), "POST", {
               email: data.get("email"),
               password: data.get("password"),
               ...(signup ? { username: data.get("username") } : {}),
               ...(signup ? { acceptedLegal: accepted, legalVersion: LEGAL_VERSION } : {}),
             });
             const next = new URLSearchParams(window.location.search).get("next");
-            window.location.assign(signup || next === "/upgrade" ? "/upgrade" : "/dashboard");
+            if(result.needsVerification) window.location.assign("/verify-email");
+            else window.location.assign(signup || next === "/upgrade" ? "/upgrade" : "/dashboard");
           } catch (e: any) {
             setError(e.message);
             setBusy(false);
@@ -107,6 +107,7 @@ export default function AuthForm({ signup = false }: { signup?: boolean }) {
           {signup ? "Log in" : "Create an account"}
         </a>
       </small>
+      {!signup && <small><a href="/forgot-password">Forgot your password?</a></small>}
     </section>
     {signup && <GameInspiration />}
     <Dialog open={!!legal} onOpenChange={open => { if (!open) setLegal(null); }}><DialogContent className="legal-dialog sm:max-w-2xl"><DialogTitle>{legal ? legalDocuments[legal].title : "Legal information"}</DialogTitle><DialogDescription>Read the draft below. Closing this window does not change your agreement choice.</DialogDescription>{legal && <LegalContent kind={legal}/>}<button className="button" onClick={() => setLegal(null)}>Close</button></DialogContent></Dialog>

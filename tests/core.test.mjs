@@ -116,7 +116,9 @@ check(
 );
 const consent = sqlite.prepare("SELECT legal_version,legal_accepted_at FROM users WHERE email=?").get("one@example.test");
 check(consent.legal_version === LEGAL_VERSION && consent.legal_accepted_at > 0, "Acceptance version and timestamp persist");
-check((await request("projects", "GET", undefined, a.cookie)).status === 402, "Unpaid account cannot read workspace API");
+const unverifiedWorkspace = await request("projects", "GET", undefined, a.cookie);
+check(unverifiedWorkspace.status === 403 && unverifiedWorkspace.data.code === "EMAIL_NOT_VERIFIED", "Unverified account cannot read workspace API");
+sqlite.prepare("UPDATE users SET email_verified_at=? WHERE email IN (?,?)").run(Date.now(), "one@example.test", "two@example.test");
 check((await request("projects", "POST", { name: "Bypass", workspace_enabled: 1 }, a.cookie)).status === 402, "Client cannot grant itself workspace access");
 env.STRIPE_SECRET_KEY = "sk_test_fixture";
 let stripeBody = "";

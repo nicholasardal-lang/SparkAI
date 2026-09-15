@@ -1,12 +1,11 @@
 "use client";
 
-import { LogoMark } from "@/components/brand";
-import { ArrowUpRight, ChevronDown, Compass, CreditCard, Coins, MessageCircle, BookOpen, Radio, Zap, Layers } from "lucide-react";
+import { ArrowUpRight, ChevronDown, Compass, CreditCard, Coins, MessageCircle, BookOpen, Radio, Sparkles, Layers } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 
 const menus = [
   { title: "Explore", items: [
-    { title: "Try the workspace", detail: "Start with your next game idea", href: "/#workspace", icon: Zap },
+    { title: "Try the workspace", detail: "Start with your next game idea", href: "/#workspace", icon: Sparkles },
     { title: "How Spark works", detail: "From first idea to your next build", href: "/#how", icon: Compass },
     { title: "What you can build", detail: "Planning, Luau scripts, and debugging", href: "/#features", icon: Layers },
   ] },
@@ -23,7 +22,7 @@ const menus = [
 
 export default function SiteNav() {
   return <nav className="nav site-nav" aria-label="Main navigation">
-    <a className="brand" href="/" aria-label="Spark home"><LogoMark /><span>Spark</span></a>
+    <a className="brand" href="/" aria-label="Spark home"><span className="logo-mark" aria-hidden="true">✦</span><span>Spark</span></a>
     <div className="site-nav-menus">
       {menus.map(menu => <DropdownMenu key={menu.title} modal={false}>
         <DropdownMenuTrigger className="nav-menu-trigger">{menu.title}<ChevronDown size={14} aria-hidden="true" /></DropdownMenuTrigger>

@@ -6,6 +6,7 @@ export async function stripe(env:Runtime,path:string,fetcher:typeof fetch=fetch,
  if(!r.ok)throw new Error("Stripe could not verify billing");return r.json() as Promise<any>;
 }
 export function monthAt(start:number,n:number){const d=new Date(start);const day=d.getUTCDate();d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()+n);const last=new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,0)).getUTCDate();d.setUTCDate(Math.min(day,last));return d.getTime();}
+export function estimateCredits(inputChars:number,contextChars=0,maxOutputTokens=2048){return Math.max(1,Math.ceil((Math.max(0,inputChars)+Math.max(0,contextChars)+2000+maxOutputTokens*5)/1000));}
 export async function syncSubscription(env:Runtime,userId:string,subId:string,fetcher:typeof fetch=fetch){
  const s=await stripe(env,`subscriptions/${encodeURIComponent(subId)}?expand[]=latest_invoice`,fetcher);
  const item=s.items?.data?.[0];const price=item?.price?.id;
@@ -29,9 +30,22 @@ export async function balance(env:Runtime,userId:string,fetcher:typeof fetch=fet
   try{await syncSubscription(env,userId,b.stripe_subscription_id,fetcher);b=await env.DB.prepare("SELECT * FROM billing_accounts WHERE user_id=?").bind(userId).first();}catch{ /* Expiration remains enforced even when Stripe is unavailable. */ }
  }
  const now=Date.now(),active=!!b&&b.paid_until>now&&["active","past_due"].includes(b.subscription_status);
- if(active){const p=plans.find(p=>p.id===b.plan_id);if(p){let n=0;while(n<12&&monthAt(b.period_start,n+1)<=now)n++;const start=monthAt(b.period_start,n),end=Math.min(monthAt(b.period_start,n+1),b.paid_until);
- if(start<=now&&end>now)await env.DB.prepare("INSERT INTO credit_buckets (id,user_id,remaining,expires,source) VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING").bind(`plan:${b.stripe_subscription_id}:${start}`,userId,p.credits,end,"plan").run();}}
- if(!active)await env.DB.prepare("UPDATE credit_buckets SET expires=? WHERE user_id=? AND source='plan' AND expires>?").bind(now,userId,now).run();
+ if(active&&b?.period_start){
+  const p=plans.find(p=>p.id===b.plan_id);
+  if(p){
+   let n=0;while(n<12&&monthAt(b.period_start,n+1)<=now)n++;
+   const start=monthAt(b.period_start,n),end=Math.min(monthAt(b.period_start,n+1),b.paid_until);
+   if(start<=now&&end>now){
+    const bucketId=`plan:${b.stripe_subscription_id}:${start}`;
+    await env.DB.batch([
+     env.DB.prepare("INSERT INTO credit_buckets (id,user_id,remaining,expires,source) VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING").bind(bucketId,userId,p.credits,end,"plan"),
+     env.DB.prepare("INSERT INTO credit_ledger (id,user_id,amount,source,stripe_reference,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(stripe_reference) DO NOTHING").bind(crypto.randomUUID(),userId,p.credits,"subscription_grant",`grant:${bucketId}`,Date.now()),
+    ]);
+   }
+  }
+ } else {
+  await env.DB.prepare("UPDATE credit_buckets SET expires=? WHERE user_id=? AND source='plan' AND expires>?").bind(now,userId,now).run();
+ }
  const row=await env.DB.prepare("SELECT COALESCE(SUM(remaining),0) AS credits FROM credit_buckets WHERE user_id=? AND (expires IS NULL OR expires>?)").bind(userId,now).first();
  return {credits:Number(row.credits),active,plan:b?.plan_id||null,paidUntil:b?.paid_until||null,cancelAtPeriodEnd:!!b?.cancel_at_period_end,status:b?.subscription_status||"none"};
 }

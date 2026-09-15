@@ -1,5 +1,4 @@
 "use client";
-import { LogoMark } from "@/components/brand";
 import { useEffect, useRef, useState } from "react";
 import { Code2, ArrowUp, Plus } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -166,12 +165,15 @@ export default function Workspace({ id }: { id: string }) {
         (match: any) => match[1],
       ),
     );
+  const estimatedCredits = draft.trim().length > 900
+    ? Math.max(1, Math.ceil((draft.trim().length + 2000 + 2048 * 5) / 1000))
+    : 0;
   return (
     <SidebarProvider>
       <Sidebar>
         <SidebarHeader className="p-6">
           <a className="brand" href="/dashboard">
-            <LogoMark /> <span>Spark</span>
+            ✦ <span>Spark</span>
           </a>
         </SidebarHeader>
         <SidebarContent>
@@ -232,7 +234,7 @@ export default function Workspace({ id }: { id: string }) {
             </div>
           ) : !data.messages.length ? (
             <div className="welcome">
-              <span className="spark-avatar"><LogoMark /></span>
+              <span className="spark-avatar">✦</span>
               <h2>What will you create?</h2>
               <p>
                 A new world, a clever mechanic, or your very first script.
@@ -258,7 +260,7 @@ export default function Workspace({ id }: { id: string }) {
               <article className={"message " + m.role} key={m.id}>
                 {m.role === "assistant" ? (
                   <>
-                    <b><LogoMark /> Spark</b>
+                    <b>✦ Spark</b>
                     <Markdown text={m.content} />
                   </>
                 ) : (
@@ -269,7 +271,7 @@ export default function Workspace({ id }: { id: string }) {
           )}
           {busy && (
             <p className="muted" role="status">
-              <LogoMark /> Spark is working on your idea…
+              ✦ Spark is working on your idea…
             </p>
           )}
           <div ref={end} />
@@ -314,6 +316,11 @@ export default function Workspace({ id }: { id: string }) {
                   </div>
                 ))}
               </details>
+            )}
+            {estimatedCredits > 0 && (
+              <div className="usage-estimate" role="status">
+                Estimated usage: about {estimatedCredits.toLocaleString()} Spark Credits. Actual usage can vary with conversation context and response length.
+              </div>
             )}
             <form
               className="composer"

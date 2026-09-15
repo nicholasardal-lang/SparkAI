@@ -1,10 +1,9 @@
-import { LogoMark } from "@/components/brand";
 import {
   ArrowUpRight,
   Code2,
   Bug,
   Layers,
-  Zap,
+  Sparkles,
   Plus,
   ArrowUp,
   List,
@@ -17,7 +16,7 @@ export default function Home() {
       <SiteNav />
       <section className="hero">
         <div className="eyebrow">
-          <Zap size={15} /> YOUR NEXT GAME STARTS WITH A SPARK
+          <Sparkles size={15} /> YOUR NEXT GAME STARTS WITH A SPARK
         </div>
         <h1>
           <span>SPARK</span> your
@@ -41,7 +40,7 @@ export default function Home() {
         <div className="preview">
           <aside>
             <a className="brand" href="/">
-              <LogoMark /><span>Spark</span>
+              <span className="logo-mark" aria-hidden="true">✦</span><span>Spark</span>
             </a>
             <div className="preview-new preview-control">
               <Plus size={16} /> New project
@@ -67,7 +66,7 @@ export default function Home() {
                 Help me create a checkpoint system for my obby.
               </div>
               <div className="example-answer">
-                <span className="spark-avatar"><LogoMark /></span>
+                <span className="spark-avatar">✦</span>
                 <div>
                   <b>
                     Spark <small>EXAMPLE</small>
@@ -103,9 +102,9 @@ export default function Home() {
           <p>Join 18,000 Roblox developers turning small sparks into worlds worth playing.</p>
         </div>
         <div className="claim-row">
-          <span><LogoMark />First drafts in minutes</span>
-          <span><LogoMark />Clearer Luau, faster</span>
-          <span><LogoMark />Keep your momentum</span>
+          <span>First drafts in minutes</span>
+          <span>Clearer Luau, faster</span>
+          <span>Keep your momentum</span>
         </div>
         <div className="quotes">
           {[

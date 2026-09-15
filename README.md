@@ -6,7 +6,7 @@ Spark is a working web app for planning Roblox games, generating Luau scripts, a
 
 Spark is publicly available at https://spark-roblox-creative-workspace.puriux.chatgpt.site. It has its own email/password accounts. Test accounts and the local test database are not deployed. See [Working on Spark](docs/WORKING-ON-SPARK.md) for using the shared GitHub project on Mac and PC.
 
-Click **Get started**, create an account with an email address and a password of at least 12 characters, and accept the Terms and Privacy drafts. New accounts go to plan selection. Stripe sandbox checkout is implemented in source but requires the hosted Stripe secrets and webhook registration before it is deployed. OpenAI billing and a hosted API key are also needed for AI requests. See [Payment preview](docs/PAYMENTS-PREVIEW.md) for the remaining integration work.
+Click **Get started**, create an account with a unique username, an email address, and a password of at least 12 characters, and accept the Terms and Privacy drafts. New accounts go to plan selection. Email verification is enabled for new accounts when the hosted Resend settings are configured. Stripe sandbox checkout, subscription management, cancellation, credit grants, and webhook provisioning are implemented in source but require the hosted Stripe secrets and webhook registration. OpenAI billing and a hosted API key are also needed for AI requests. See [Payment preview](docs/PAYMENTS-PREVIEW.md) for the remaining integration work.
 
 ## Enable OpenAI safely
 
@@ -41,6 +41,10 @@ To configure local AI, copy `.env.example` to `.env`, then privately edit the bl
 | `OPENAI_MODEL`         | `gpt-5-mini`        | Backend-only configurable model                                  |
 | `DAILY_MESSAGE_LIMIT`  | `30`                | Per-account AI requests per UTC day; bounded between 1 and 1,000 |
 | `AI_MAX_OUTPUT_TOKENS` | `2048`              | Per-response output limit; bounded between 256 and 4,096         |
+| `RESEND_API_KEY`       | Empty               | Server-side key for verification and password recovery email    |
+| `EMAIL_FROM`           | Empty               | Verified sender address used by the email provider              |
+| `APP_ORIGIN`           | Request origin      | Public origin used in links sent by email                       |
+| `ADMIN_EMAIL`          | Empty               | Owner account allowed to read `/api/admin/metrics`               |
 
 Messages are limited to 8,000 characters and request bodies to 24 KB. Context includes up to the latest 30 messages within 30,000 characters, plus project details. Each initial AI attempt consumes one daily allowance, including failed provider calls; up to two automatic retries for explicit temporary rate limits or provider 5xx errors belong to that attempt. A saved request can have at most three user-initiated AI attempts. Requests that lack an API key consume no AI allowance. The quota is per user, not a global billing cap: set provider-side spending limits before broad public access.
 
@@ -50,7 +54,7 @@ Invalid credentials, insufficient credits, model/configuration errors, temporary
 
 Authentication uses salted PBKDF2-SHA256 password hashes (100,000 iterations, compatible with the Worker Web Crypto limit), random session tokens stored only as SHA-256 hashes, and HttpOnly/SameSite cookies that are Secure over HTTPS. Sessions last seven days and logout removes the server session. Server-side ownership checks protect every project and conversation operation. All SQL uses bound parameters. Mutations check their Origin and require JSON. Auth attempts are limited by email and IP. Markdown renders without raw HTML or external images.
 
-This first version does not include email verification, password recovery, a Roblox Studio plugin, code execution, or publication to Roblox. Do not rely on an email address being verified. Data is stored in the deployment's database; saved conversation content is sent to OpenAI only when configured and a response is requested. No sample projects are inserted into real accounts.
+Password recovery and email verification use short-lived, single-use, hashed tokens. Configure `RESEND_API_KEY`, `EMAIL_FROM`, and `APP_ORIGIN` in server-side hosting settings for delivery; without an email provider, new accounts remain pending verification until delivery is configured. Subscription entitlements are extended only by paid Stripe invoices, cancellation and failed-renewal events are handled, and credits are ledgered and reserved transactionally. A Roblox Studio plugin, code execution, and publication to Roblox are not included. Data is stored in the deployment's database; saved conversation content is sent to OpenAI only when configured and a response is requested. No sample projects are inserted into real accounts.
 
 ## Checks
 

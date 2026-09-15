@@ -1,7 +1,6 @@
 "use client";
-import { LogoMark } from "@/components/brand";
 import { useEffect, useState } from "react";
-import { Check, Zap } from "lucide-react";
+import { Check, Sparkles } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { plans, creditPacks } from "@/lib/spark/plans";
 import { api } from "./auth-form";
@@ -40,7 +39,7 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, []);
   return <main className="plans-page">
-    <nav className="plans-nav"><a className="brand" href="/"><LogoMark /><span>Spark</span></a>{signedIn ? <button onClick={async () => { try { await api("auth/logout", "POST", {}); location.assign("/"); } catch { setError("Could not log out. Please try again."); } }}>Log out</button> : <a href="/login">Log in</a>}</nav>
+    <nav className="plans-nav"><a className="brand" href="/"><span className="logo-mark" aria-hidden="true">✦</span><span>Spark</span></a>{signedIn ? <button onClick={async () => { try { await api("auth/logout", "POST", {}); location.assign("/"); } catch { setError("Could not log out. Please try again."); } }}>Log out</button> : <a href="/login">Log in</a>}</nav>
     {confirmingPayment && <p className="notice" role="status">Payment confirmed. Unlocking your Spark workspace…</p>}
     <header className="plans-heading"><span className="pill">YOUR NEXT CHAPTER</span><h1>Give your ideas room to <span>grow.</span></h1><p>{signedIn ? "Your account is ready. Choose a plan or add credits to unlock Spark." : "Choose the right amount of Spark for the way you build."}</p></header>
     <div className="billing-toggle" role="group" aria-label="Billing frequency"><button aria-pressed={!yearly} onClick={() => setYearly(false)}>Monthly</button><button aria-pressed={yearly} onClick={() => setYearly(true)}>Yearly <span>Save 16.7%</span></button></div>
@@ -48,7 +47,7 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
       <div className="plan-title"><h2>{plan.name}</h2>{plan.id === "creator" && <span className="pill">Most Popular</span>}</div>
       <p>{plan.description}</p><div className="plan-price">${yearly ? (plan.yearly / 12).toLocaleString("en-US", { maximumFractionDigits: 2 }) : plan.monthly}<span>/ month</span></div>
       <p className="billing-detail">{yearly ? <><s aria-label="Cost of twelve monthly payments">${plan.monthly * 12}</s> <strong>${plan.yearly} billed yearly</strong><br/><span className="annual-saving">Save ${plan.monthly * 12 - plan.yearly} per year</span></> : `$${plan.monthly} billed monthly`}</p>
-      <div className="plan-credits"><Zap size={18}/><strong>{plan.credits.toLocaleString("en-US")} Spark Credits</strong><span>every month</span></div>
+      <div className="plan-credits"><Sparkles size={18}/><strong>{plan.credits.toLocaleString("en-US")} Spark Credits</strong><span>every month</span></div>
       <ul>{["Game planning and Luau scripting", "Debugging and code explanations", "Saved projects and conversations", "Optional credit top-ups"].map(feature => <li key={feature}><Check size={16}/>{feature}</li>)}</ul>
       <button className="button" onClick={() => signedIn ? setSelection({ planId: plan.id, title: `Spark ${plan.name}`, price: plan.monthly, details: `${plan.credits.toLocaleString("en-US")} credits issued each month` }) : location.assign("/signup")}>Choose {plan.name}</button>
     </article>)}</div>

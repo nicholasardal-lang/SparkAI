@@ -1,6 +1,6 @@
 import { LEGAL_VERSION } from "./legal.ts";
 import { plans, creditPacks, stripePrices } from "./plans.ts";
-import { balance, reserve, settle, stripe, syncSubscription } from "./billing.ts";
+import { balance, estimateCredits, reserve, settle, stripe, syncSubscription } from "./billing.ts";
 export type DB = {
   prepare(sql: string): any;
   batch(statements: any[]): Promise<any>;
@@ -13,6 +13,10 @@ export type Runtime = {
   AI_MAX_OUTPUT_TOKENS?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
+  APP_ORIGIN?: string;
+  ADMIN_EMAIL?: string;
 };
 const encoder = new TextEncoder();
 export class ApiError extends Error {
@@ -87,12 +91,32 @@ async function stripeRequest(env: Runtime, params: URLSearchParams, fetcher: typ
   if (!response.ok || !data.url) fail(502, "CHECKOUT_UNAVAILABLE", "Stripe checkout could not be started. Please try again.");
   return data.url as string;
 }
+async function deliverEmail(env:Runtime,to:string,subject:string,html:string,fetcher:typeof fetch){
+  if(!env.RESEND_API_KEY||!env.EMAIL_FROM)return false;
+  try{
+    const response=await fetcher("https://api.resend.com/emails",{method:"POST",headers:{Authorization:`Bearer ${env.RESEND_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({from:env.EMAIL_FROM,to:[to],subject,html}),signal:AbortSignal.timeout(10000)});
+    return response.ok;
+  }catch{return false;}
+}
+async function issueAuthToken(db:DB,userId:string,purpose:string){
+  const raw=crypto.randomUUID()+crypto.randomUUID();
+  await db.prepare("UPDATE auth_tokens SET used_at=? WHERE user_id=? AND purpose=? AND used_at IS NULL").bind(Date.now(),userId,purpose).run();
+  await db.prepare("INSERT INTO auth_tokens(token_hash,user_id,purpose,expires,created_at) VALUES (?,?,?,?,?)").bind(await hash(raw),userId,purpose,Date.now()+(purpose==="password_reset"?3600000:86400000),Date.now()).run();
+  return raw;
+}
+async function consumeAuthToken(db:DB,raw:string,purpose:string){
+  const row=await db.prepare("SELECT * FROM auth_tokens WHERE token_hash=? AND purpose=? AND used_at IS NULL AND expires>? ").bind(await hash(raw),purpose,Date.now()).first();
+  if(!row)fail(400,"INVALID_TOKEN",purpose==="password_reset"?"That password reset link is invalid or expired.":"That verification link is invalid or expired.");
+  await db.prepare("UPDATE auth_tokens SET used_at=? WHERE token_hash=?").bind(Date.now(),await hash(raw)).run();
+  return row;
+}
+function authTokenFrom(value:any){return string(value,200,"Token",20);}
 export async function userFor(cookie: string, db: DB) {
   const token = cookie.match(/(?:^|;\s*)spark_session=([a-f0-9-]+)/)?.[1];
   if (!token) return null;
   return db
     .prepare(
-      "SELECT users.id,users.email,users.username,users.avatar_color,users.workspace_enabled FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires>?",
+      "SELECT users.id,users.email,users.username,users.avatar_color,users.workspace_enabled,users.email_verified_at,users.email_verification_required FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires>?",
     )
     .bind(await hash(token), Date.now())
     .first();
@@ -320,7 +344,14 @@ export async function handle(
         }
       }
       if (["customer.subscription.updated", "customer.subscription.deleted"].includes(event.type) && userId) {
-        await syncSubscription(env,userId,object.id,fetcher);
+        if (event.type === "customer.subscription.deleted") {
+          // Stripe's deleted event is the authoritative cancellation signal. The
+          // subscription endpoint may already be unavailable, so do not fetch it.
+          const endedAt = Number(object.current_period_end || 0) * 1000;
+          await db.prepare("UPDATE billing_accounts SET subscription_status='canceled',cancel_at_period_end=1,paid_until=CASE WHEN ?>0 THEN ? ELSE paid_until END,updated_at=? WHERE user_id=? AND stripe_subscription_id=?").bind(endedAt,endedAt,Date.now(),userId,object.id).run();
+        } else {
+          await syncSubscription(env,userId,object.id,fetcher);
+        }
         const active = ["active", "trialing"].includes(object.status);
         await db.prepare("UPDATE billing_accounts SET subscription_status=?,updated_at=? WHERE user_id=?").bind(object.status, Date.now(), userId).run();
         if (!active) {
@@ -338,6 +369,10 @@ export async function handle(
       } catch(error) {
         throw error;
       }
+    }
+    if(path[0]==="health"&&method==="GET"){
+      try{await db.prepare("SELECT 1 AS ok").first();return json({ok:true,aiConfigured:!!env.OPENAI_API_KEY,stripeConfigured:!!env.STRIPE_SECRET_KEY,timestamp:Date.now()});}
+      catch{return json({ok:false,error:"Storage unavailable",timestamp:Date.now()},503);}
     }
     if (!["GET", "HEAD"].includes(method)) {
       const origin = req.headers.get("origin");
@@ -387,11 +422,11 @@ export async function handle(
         const digest = await passwordHash(password, salt);
         await db
           .prepare(
-            "INSERT INTO users (id,email,password,salt,legal_version,legal_accepted_at,username) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO users (id,email,password,salt,legal_version,legal_accepted_at,username,email_verification_required) VALUES (?,?,?,?,?,?,?,1)",
           )
           .bind(id, email, digest, salt, LEGAL_VERSION, Date.now(), username)
           .run();
-        user = { id, email };
+        user = { id, email, email_verification_required: 1, email_verified_at: null };
       } else {
         const digest = await passwordHash(
           password,
@@ -405,9 +440,37 @@ export async function handle(
         .prepare("INSERT INTO sessions (token,user_id,expires) VALUES (?,?,?)")
         .bind(await hash(token), user.id, Date.now() + 604800000)
         .run();
-      return json({ user: { id: user.id, email: user.email } }, 200, {
+      let verificationSent=false;
+      if(path[1]==="signup"){
+        const token=await issueAuthToken(db,user.id,"email_verification");
+        verificationSent=await deliverEmail(env,user.email,"Verify your Spark email",`<p>Welcome to Spark.</p><p>Verify your email to start building:</p><p><a href="${env.APP_ORIGIN||url.origin}/verify-email?token=${encodeURIComponent(token)}">Verify my email</a></p><p>This link expires in 24 hours.</p>`,fetcher);
+      }
+      return json({ user: { id: user.id, email: user.email }, needsVerification:user.email_verification_required===1&&!user.email_verified_at, verificationSent }, 200, {
         "Set-Cookie": `spark_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${url.protocol === "https:" ? "; Secure" : ""}`,
       });
+    }
+    if(path[0]==="auth"&&path[1]==="verify-email"&&method==="POST"){
+      const b=await body(req);const token=authTokenFrom(b.token);const row=await consumeAuthToken(db,token,"email_verification");
+      await db.prepare("UPDATE users SET email_verified_at=? WHERE id=?").bind(Date.now(),row.user_id).run();
+      return json({ok:true});
+    }
+    if(path[0]==="auth"&&path[1]==="resend-verification"&&method==="POST"){
+      const b=await body(req);const email=string(b.email,254,"Email").toLowerCase();
+      const target=await db.prepare("SELECT id,email,email_verified_at,email_verification_required FROM users WHERE email=?").bind(email).first();
+      let sent=false;if(target?.email_verification_required===1&&!target.email_verified_at){const token=await issueAuthToken(db,target.id,"email_verification");sent=await deliverEmail(env,target.email,"Verify your Spark email",`<p><a href="${env.APP_ORIGIN||url.origin}/verify-email?token=${encodeURIComponent(token)}">Verify my email</a></p><p>This link expires in 24 hours.</p>`,fetcher);}
+      return json({ok:true,sent});
+    }
+    if(path[0]==="auth"&&path[1]==="forgot-password"&&method==="POST"){
+      const b=await body(req);const email=string(b.email,254,"Email").toLowerCase();
+      const target=await db.prepare("SELECT id,email FROM users WHERE email=?").bind(email).first();
+      let sent=false;if(target){const token=await issueAuthToken(db,target.id,"password_reset");sent=await deliverEmail(env,target.email,"Reset your Spark password",`<p>Reset your Spark password:</p><p><a href="${env.APP_ORIGIN||url.origin}/reset-password?token=${encodeURIComponent(token)}">Reset my password</a></p><p>This link expires in one hour.</p>`,fetcher);}
+      return json({ok:true,sent});
+    }
+    if(path[0]==="auth"&&path[1]==="reset-password"&&method==="POST"){
+      const b=await body(req);const token=authTokenFrom(b.token);const row=await consumeAuthToken(db,token,"password_reset");
+      const next=string(b.password,128,"Password",12),salt=crypto.randomUUID();
+      await db.batch([db.prepare("UPDATE users SET password=?,salt=?,email_verified_at=COALESCE(email_verified_at,?),email_verification_required=0 WHERE id=?").bind(await passwordHash(next,salt),salt,Date.now(),row.user_id),db.prepare("DELETE FROM sessions WHERE user_id=?").bind(row.user_id)]);
+      return json({ok:true});
     }
     const user = await requireUser(req, db);
     if (path[0] === "profile" && method === "PATCH") {
@@ -451,13 +514,25 @@ export async function handle(
       const billing=await balance(env,user.id,fetcher);
       return json({ user:{...user,workspace_enabled:billing.active||billing.credits>0?1:0}, billing, aiConfigured: !!env.OPENAI_API_KEY });
     }
+    if(path[0]==="billing"&&path[1]==="transactions"&&method==="GET"){
+      const rows=(await db.prepare("SELECT id,amount,source,created_at,stripe_reference FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(user.id).all()).results;
+      return json({transactions:rows});
+    }
+    if(path[0]==="admin"&&path[1]==="metrics"&&method==="GET"){
+      if(!env.ADMIN_EMAIL||user.email.toLowerCase()!==env.ADMIN_EMAIL.toLowerCase())fail(403,"FORBIDDEN","Owner monitoring is not enabled for this account.");
+      const [users,active,requests,errors,credits]=await Promise.all([
+        db.prepare("SELECT COUNT(*) AS count FROM users").first(),db.prepare("SELECT COUNT(*) AS count FROM billing_accounts WHERE paid_until>? AND subscription_status IN ('active','past_due')").bind(Date.now()).first(),db.prepare("SELECT COUNT(*) AS count FROM requests WHERE created>?").bind(Date.now()-86400000).first(),db.prepare("SELECT COUNT(*) AS count FROM requests WHERE state='error' AND created>?").bind(Date.now()-86400000).first(),db.prepare("SELECT COALESCE(SUM(remaining),0) AS credits FROM credit_buckets WHERE expires IS NULL OR expires>?").bind(Date.now()).first(),
+      ]);return json({users:users.count,activeSubscriptions:active.count,requests24h:requests.count,errors24h:errors.count,creditsOutstanding:credits.credits,timestamp:Date.now()});
+    }
     if(path[0]==="billing"&&path[1]==="portal"&&method==="POST") {
+      if(user.email_verification_required===1&&!user.email_verified_at)fail(403,"EMAIL_NOT_VERIFIED","Verify your email before managing billing.");
       const account=await db.prepare("SELECT stripe_customer_id FROM billing_accounts WHERE user_id=?").bind(user.id).first();
       if(!account?.stripe_customer_id)fail(400,"NO_SUBSCRIPTION","Choose a subscription first.");
       const session=await stripe(env,"billing_portal/sessions",fetcher,new URLSearchParams({customer:account.stripe_customer_id,return_url:`${url.origin}/account?tab=billing`}));
       return json({url:session.url});
     }
     if (path[0] === "billing" && path[1] === "checkout" && method === "POST") {
+      if(user.email_verification_required===1&&!user.email_verified_at)fail(403,"EMAIL_NOT_VERIFIED","Verify your email before starting checkout.");
       const b = await body(req);
       const params = new URLSearchParams({
         "line_items[0][quantity]": "1",
@@ -492,6 +567,7 @@ export async function handle(
     // Preview access is closed until verified payment provisioning is connected.
     // There is intentionally no browser/API endpoint that grants this flag.
     if (path[0] === "projects") {
+      if(user.email_verification_required===1&&!user.email_verified_at)fail(403,"EMAIL_NOT_VERIFIED","Verify your email before opening the workspace.");
       const billing=await balance(env,user.id,fetcher);
       if(!billing.active&&billing.credits<=0)fail(402,"PLAN_REQUIRED","Choose a plan or add credits to continue building.");
     }
@@ -593,6 +669,8 @@ export async function handle(
       if (path[2] === "messages" && method === "POST") {
         const b = await body(req);
         const content = string(b.content, 8000, "Message");
+        const ip=req.headers.get("cf-connecting-ip")||"local",minute=Math.floor(Date.now()/60000);
+        if(!(await consume(db,`ai-ip:${await hash(ip)}:${minute}`,20))||!(await consume(db,`ai-user:${user.id}:${minute}`,12)))fail(429,"RATE_LIMIT","Too many AI requests. Please wait a minute and try again.");
         const id = string(b.requestId, 80, "Request ID");
         if (!/^[a-f0-9-]{36}$/.test(id))
           fail(400, "INVALID_ID", "Invalid request ID.");
@@ -699,7 +777,7 @@ export async function handle(
           }
           const maxOutput=Math.min(4096,Math.max(256,Number(env.AI_MAX_OUTPUT_TOKENS)||2048));
           // Reserve against a conservative token upper bound, then charge reported usage.
-          const maximum=Math.ceil((encoder.encode(JSON.stringify(context)+JSON.stringify(project)).length+2000+maxOutput*5)/1000);
+          const maximum=estimateCredits(encoder.encode(JSON.stringify(context)+JSON.stringify(project)).length,0,maxOutput);
           let parts:any[];
           try{parts=await reserve(db,user.id,id,maximum);}catch(e){fail(402,"SPARK_CREDITS_REQUIRED",e instanceof Error?e.message:"Add Spark Credits to continue.");}
           let usage:any,answer:string;

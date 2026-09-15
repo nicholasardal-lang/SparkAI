@@ -1,5 +1,4 @@
 "use client";
-import { LogoMark } from "@/components/brand";
 export default function ErrorPage({
   reset,
 }: {
@@ -9,7 +8,7 @@ export default function ErrorPage({
   return (
     <main className="auth-card">
       <a className="brand" href="/">
-        <LogoMark /> <span>Spark</span>
+        ✦ <span>Spark</span>
       </a>
       <h1>Something didn’t load.</h1>
       <p>Spark couldn’t reach your workspace. Please try again in a moment.</p>

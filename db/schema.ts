@@ -14,6 +14,8 @@ export const users = sqliteTable("users", {
   salt: text("salt").notNull(),
   legalVersion: text("legal_version"),
   legalAcceptedAt: integer("legal_accepted_at"),
+  emailVerifiedAt: integer("email_verified_at"),
+  emailVerificationRequired: integer("email_verification_required").notNull().default(0),
   workspaceEnabled: integer("workspace_enabled").notNull().default(0),
 });
 // Claims deliberately survive username changes and account deletion.
@@ -106,3 +108,8 @@ export const creditLocks=sqliteTable("credit_locks",{
   userId:text("user_id").primaryKey().references(()=>users.id,{onDelete:"cascade"}),requestId:text("request_id").notNull(),
   expires:integer("expires").notNull(),parts:text("parts").notNull().default("[]"),
 });
+export const authTokens=sqliteTable("auth_tokens",{
+  tokenHash:text("token_hash").primaryKey(),
+  userId:text("user_id").notNull().references(()=>users.id,{onDelete:"cascade"}),
+  purpose:text("purpose").notNull(),expires:integer("expires").notNull(),createdAt:integer("created_at").notNull(),usedAt:integer("used_at"),
+},t=>[index("auth_tokens_user_purpose").on(t.userId,t.purpose,t.expires)]);
