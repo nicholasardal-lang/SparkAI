@@ -49,6 +49,7 @@ export default function AuthForm({ signup = false }: { signup?: boolean }) {
             await api("auth/" + (signup ? "signup" : "login"), "POST", {
               email: data.get("email"),
               password: data.get("password"),
+              ...(signup ? { username: data.get("username") } : {}),
               ...(signup ? { acceptedLegal: accepted, legalVersion: LEGAL_VERSION } : {}),
             });
             const next = new URLSearchParams(window.location.search).get("next");
@@ -59,6 +60,7 @@ export default function AuthForm({ signup = false }: { signup?: boolean }) {
           }
         }}
       >
+        {signup && <><label htmlFor="username">Username</label><input id="username" name="username" autoComplete="username" required minLength={3} maxLength={24} pattern="[a-zA-Z0-9_]+" placeholder="Your builder name"/><small>3–24 letters, numbers, or underscores.</small></>}
         <label htmlFor="email">Email address</label>
         <input
           id="email"

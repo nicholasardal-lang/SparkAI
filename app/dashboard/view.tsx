@@ -18,8 +18,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "../auth-form";
+import AccountMenu from "../account-menu";
 import { readIdea, saveIdea, clearIdea, type StartingIdea } from "@/lib/spark/draft";
-export default function Dashboard({ email }: { email: string }) {
+export default function Dashboard({ billing }: { billing: any }) {
   const [idea, setIdea] = useState<StartingIdea | null>(null);
   const [projects, setProjects] = useState<any[]>([]),
     [loading, setLoading] = useState(true),
@@ -80,24 +81,10 @@ export default function Dashboard({ email }: { email: string }) {
         <a className="brand" href="/">
           ✦ <span>Spark</span>
         </a>
-        <div>
-          <span className="muted">{email}</span>
-          <button
-            onClick={async () => {
-              try {
-                await api("auth/logout", "POST", {});
-                clearIdea();
-                location.assign("/");
-              } catch (e: any) {
-                setError(e.message);
-              }
-            }}
-          >
-            Log out
-          </button>
-        </div>
+        <AccountMenu/>
       </nav>
       <main className="dashboard">
+        <div className="billing-summary"><strong>{billing.credits.toLocaleString()} Spark Credits</strong><span>{billing.active ? `${billing.plan} plan` : "Credit balance"}</span><a href="/account?tab=billing">Manage billing ↗</a></div>
         {idea && !idea.projectId && <section className="starting-idea"><h2>Your idea came with you.</h2><p>{idea.content}</p><button className="button" onClick={() => { setError(""); setEditing({ name: "My next game", description: "", useIdea: true }); }}>Create a project with this idea</button><button onClick={() => { clearIdea(); setIdea(null); }}>Dismiss</button></section>}
         <div className="dashboard-heading">
           <div>
@@ -114,6 +101,8 @@ export default function Dashboard({ email }: { email: string }) {
             <Plus size={17} /> New project
           </button>
         </div>
+        <section className="dashboard-starters"><div><h2>Start with a spark</h2><p className="muted">Choose a starting point. Make it your own.</p></div><div className="starter-grid">{[{name:"Obby adventure",description:"Plan an obstacle course with checkpoints, stages, and a finish reward."},{name:"Survival world",description:"Design a survival loop with resources, crafting, and escalating challenges."},{name:"Fix a script",description:"Bring a Luau script and its error message to work through the problem."}].map(s=><button key={s.name} onClick={()=>setEditing(s)}><strong>{s.name}</strong><span>{s.description}</span><span>Start project ↗</span></button>)}</div></section>
+        <h2>Your projects <small className="muted">{projects.length}</small></h2>
         {error && (
           <div className="error" role="alert">
             {error} <button onClick={load}>Try again</button>

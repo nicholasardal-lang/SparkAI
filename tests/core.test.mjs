@@ -4,6 +4,7 @@ import { LEGAL_VERSION } from "../lib/spark/legal.ts";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { handle, providerError, callOpenAI } from "../lib/spark/core.ts";
+import { balance, syncSubscription, reserve, settle, monthAt } from "../lib/spark/billing.ts";
 const sqlite = new DatabaseSync(":memory:");
 sqlite.exec("PRAGMA foreign_keys=ON");
 for (const file of readdirSync(new URL("../drizzle/", import.meta.url)).filter(name => name.endsWith(".sql")).sort()) {
@@ -100,11 +101,13 @@ check((await request("auth/signup", "POST", { email: "stale@example.test", passw
 const a = await request("auth/signup", "POST", {
   acceptedLegal: true, legalVersion: LEGAL_VERSION,
   email: "one@example.test",
+  username: "builder_one",
   password: "test-password-one",
 });
 const b = await request("auth/signup", "POST", {
   acceptedLegal: true, legalVersion: LEGAL_VERSION,
   email: "two@example.test",
+  username: "builder_two",
   password: "test-password-two",
 });
 check(
@@ -133,6 +136,7 @@ await webhookRequest();
 check(sqlite.prepare("SELECT COUNT(*) AS count FROM credit_ledger WHERE user_id=?").get(b.data.user.id).count === 1, "Duplicate Stripe events do not duplicate credits");
 // Only this isolated test database provisions access for the existing workspace suite.
 sqlite.prepare("UPDATE users SET workspace_enabled=1").run();
+sqlite.prepare("INSERT INTO credit_buckets(id,user_id,remaining,source) VALUES ('fixture',?,1000,'pack')").run(a.data.user.id);
 check(
   (await request("projects", "GET", undefined, a.cookie)).data.projects
     .length === 0,
@@ -324,3 +328,40 @@ check(true, "Empty incomplete replies return actionable errors");
 console.log(
   `${checks} checks passed. Provider responses were test fixtures, never live OpenAI.`,
 );
+const owner=b.data.user.id;
+const start=Date.now()-86400000,end=monthAt(start,1);
+let subscription={id:'sub_fixture',customer:'cus_fixture',metadata:{user_id:owner},status:'active',cancel_at_period_end:false,latest_invoice:{status:'paid'},items:{data:[{current_period_start:Math.floor(start/1000),current_period_end:Math.floor(end/1000),price:{id:'price_1UFeGEA98x23KT8UKb0v9mj9'}}]}};
+const billingEnv={DB,STRIPE_SECRET_KEY:'fixture'};
+const billingFetch=async()=>Response.json(subscription);
+await syncSubscription(billingEnv,owner,subscription.id,billingFetch);
+let state=await balance(billingEnv,owner,billingFetch);
+check(state.active&&state.credits===1800,'Paid subscription grants credits alongside purchased credits');
+check((await balance(billingEnv,owner,billingFetch)).credits===1800,'Reload does not grant credits twice');
+subscription.cancel_at_period_end=true;
+await syncSubscription(billingEnv,owner,subscription.id,billingFetch);
+check((await balance(billingEnv,owner,billingFetch)).active,'Cancellation at period end preserves paid access');
+const paidUntil=state.paidUntil;
+subscription.status='past_due';subscription.latest_invoice.status='open';
+subscription.items.data[0].current_period_start=Math.floor(end/1000);
+subscription.items.data[0].current_period_end=Math.floor(monthAt(start,2)/1000);
+await syncSubscription(billingEnv,owner,subscription.id,billingFetch);
+check((await balance(billingEnv,owner,billingFetch)).paidUntil===paidUntil,'Failed renewal does not extend paid access');
+const reservation=await reserve(DB,owner,'spend_fixture',20);
+await assert.rejects(()=>reserve(DB,owner,'second_request',1));
+await settle(DB,owner,'spend_fixture',reservation,3);
+check((await balance(billingEnv,owner,billingFetch)).credits===1797,'Only actual usage charged after reservation');
+const failed=await reserve(DB,owner,'failure_fixture',20);
+await settle(DB,owner,'failure_fixture',failed,0);
+check((await balance(billingEnv,owner,billingFetch)).credits===1797,'Failed AI request refunds reserved credits');
+await reserve(DB,owner,'interrupted_fixture',20);
+sqlite.prepare('UPDATE credit_locks SET expires=0 WHERE user_id=?').run(owner);
+const recovered=await reserve(DB,owner,'recovered_fixture',20);
+await settle(DB,owner,'recovered_fixture',recovered,0);
+check((await balance(billingEnv,owner,billingFetch)).credits===1797,'Interrupted requests recover reserved credits after timeout');
+sqlite.prepare('UPDATE billing_accounts SET paid_until=?,updated_at=? WHERE user_id=?').run(Date.now()-1,Date.now(),owner);
+state=await balance(billingEnv,owner,billingFetch);
+check(!state.active&&state.credits===600,'Expiry removes plan access and preserves purchased credits');
+sqlite.prepare('UPDATE credit_buckets SET remaining=0 WHERE user_id=?').run(owner);
+await assert.rejects(()=>reserve(DB,owner,'empty_fixture',1));
+check((await balance(billingEnv,owner,billingFetch)).credits===0,'Exhausted credits cannot be spent');
+console.log(`${checks} total checks passed.`);

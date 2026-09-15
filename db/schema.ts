@@ -8,11 +8,18 @@ import {
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
+  username: text("username").unique(),
+  avatarColor: text("avatar_color").notNull().default("violet"),
   password: text("password").notNull(),
   salt: text("salt").notNull(),
   legalVersion: text("legal_version"),
   legalAcceptedAt: integer("legal_accepted_at"),
   workspaceEnabled: integer("workspace_enabled").notNull().default(0),
+});
+// Claims deliberately survive username changes and account deletion.
+export const usernameClaims = sqliteTable("username_claims", {
+  username: text("username").primaryKey(),
+  userId: text("user_id").notNull(),
 });
 export const sessions = sqliteTable("sessions", {
   token: text("token").primaryKey(),
@@ -78,6 +85,9 @@ export const billingAccounts = sqliteTable("billing_accounts", {
   planId: text("plan_id"),
   billingPeriod: text("billing_period"),
   subscriptionStatus: text("subscription_status"),
+  paidUntil: integer("paid_until"),
+  periodStart: integer("period_start"),
+  cancelAtPeriodEnd: integer("cancel_at_period_end").notNull().default(0),
   updatedAt: integer("updated_at").notNull(),
 });
 export const creditLedger = sqliteTable("credit_ledger", {
@@ -88,3 +98,11 @@ export const creditLedger = sqliteTable("credit_ledger", {
   stripeReference: text("stripe_reference").unique(),
   createdAt: integer("created_at").notNull(),
 }, (t) => [index("idx_credit_ledger_user_created").on(t.userId, t.createdAt)]);
+export const creditBuckets=sqliteTable("credit_buckets",{
+  id:text("id").primaryKey(),userId:text("user_id").notNull().references(()=>users.id,{onDelete:"cascade"}),
+  remaining:integer("remaining").notNull(),expires:integer("expires"),source:text("source").notNull(),
+},t=>[index("credit_buckets_user").on(t.userId)]);
+export const creditLocks=sqliteTable("credit_locks",{
+  userId:text("user_id").primaryKey().references(()=>users.id,{onDelete:"cascade"}),requestId:text("request_id").notNull(),
+  expires:integer("expires").notNull(),parts:text("parts").notNull().default("[]"),
+});

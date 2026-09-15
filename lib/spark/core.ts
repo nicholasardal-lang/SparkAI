@@ -1,5 +1,6 @@
 import { LEGAL_VERSION } from "./legal.ts";
 import { plans, creditPacks, stripePrices } from "./plans.ts";
+import { balance, reserve, settle, stripe, syncSubscription } from "./billing.ts";
 export type DB = {
   prepare(sql: string): any;
   batch(statements: any[]): Promise<any>;
@@ -23,9 +24,9 @@ export class ApiError extends Error {
     this.code = code;
   }
 }
-const fail = (status: number, code: string, message: string): never => {
+function fail(status: number, code: string, message: string): never {
   throw new ApiError(status, code, message);
-};
+}
 export async function hash(value: string) {
   return Array.from(
     new Uint8Array(
@@ -91,7 +92,7 @@ export async function userFor(cookie: string, db: DB) {
   if (!token) return null;
   return db
     .prepare(
-      "SELECT users.id,users.email,users.workspace_enabled FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires>?",
+      "SELECT users.id,users.email,users.username,users.avatar_color,users.workspace_enabled FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires>?",
     )
     .bind(await hash(token), Date.now())
     .first();
@@ -208,6 +209,7 @@ export async function callOpenAI(
   messages: any[],
   project: any,
   fetcher: typeof fetch = fetch,
+  onUsage?: (usage: any) => void,
 ) {
   for (let attempt = 0; attempt < 3; attempt++) {
     let response: Response;
@@ -253,6 +255,7 @@ export async function callOpenAI(
           "EMPTY_RESPONSE",
           "OpenAI returned no text. Your message is saved.",
         );
+      onUsage?.(data.usage);
       return (
         text +
         (data.status === "incomplete"
@@ -294,8 +297,9 @@ export async function handle(
       if (!(await verifyStripeSignature(payload, req.headers.get("stripe-signature") || "", env.STRIPE_WEBHOOK_SECRET)))
         fail(400, "INVALID_SIGNATURE", "Invalid Stripe signature.");
       const event = JSON.parse(payload);
-      const claimed = await db.prepare("INSERT INTO stripe_events (id,event_type,processed_at) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING RETURNING id").bind(event.id, event.type, Date.now()).first();
-      if (!claimed) return json({ received: true, duplicate: true });
+      const processed=await db.prepare("SELECT id FROM stripe_events WHERE id=?").bind(event.id).first();
+      if(processed)return json({received:true,duplicate:true});
+      try {
       const object = event.data?.object || {};
       const metadata = object.metadata || {};
       const userId = metadata.user_id;
@@ -305,15 +309,18 @@ export async function handle(
             db.prepare("INSERT INTO billing_accounts (user_id,stripe_customer_id,stripe_subscription_id,plan_id,billing_period,subscription_status,updated_at) VALUES (?,?,?,?,?,'active',?) ON CONFLICT(user_id) DO UPDATE SET stripe_customer_id=excluded.stripe_customer_id,stripe_subscription_id=excluded.stripe_subscription_id,plan_id=excluded.plan_id,billing_period=excluded.billing_period,subscription_status='active',updated_at=excluded.updated_at").bind(userId, object.customer, object.subscription, metadata.plan_id, metadata.billing_period, Date.now()),
             db.prepare("UPDATE users SET workspace_enabled=1 WHERE id=?").bind(userId),
           ]);
+          await syncSubscription(env,userId,object.subscription,fetcher);
         } else if (object.mode === "payment") {
           const credits = Number(metadata.credits);
           if (Number.isInteger(credits) && credits > 0) await db.batch([
+            db.prepare("INSERT INTO credit_buckets (id,user_id,remaining,expires,source) VALUES (?,?,?,NULL,'pack') ON CONFLICT(id) DO NOTHING").bind(`pack:${object.payment_intent || object.id}`,userId,credits),
             db.prepare("INSERT INTO credit_ledger (id,user_id,amount,source,stripe_reference,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(stripe_reference) DO NOTHING").bind(crypto.randomUUID(), userId, credits, "credit_pack", object.payment_intent || object.id, Date.now()),
             db.prepare("UPDATE users SET workspace_enabled=1 WHERE id=?").bind(userId),
           ]);
         }
       }
       if (["customer.subscription.updated", "customer.subscription.deleted"].includes(event.type) && userId) {
+        await syncSubscription(env,userId,object.id,fetcher);
         const active = ["active", "trialing"].includes(object.status);
         await db.prepare("UPDATE billing_accounts SET subscription_status=?,updated_at=? WHERE user_id=?").bind(object.status, Date.now(), userId).run();
         if (!active) {
@@ -321,7 +328,16 @@ export async function handle(
           if (Number(balance?.balance || 0) <= 0) await db.prepare("UPDATE users SET workspace_enabled=0 WHERE id=?").bind(userId).run();
         }
       }
+      if (["invoice.paid","invoice.payment_failed"].includes(event.type)) {
+        const subId=object.subscription || object.parent?.subscription_details?.subscription;
+        if(subId){const account=await db.prepare("SELECT user_id FROM billing_accounts WHERE stripe_subscription_id=?").bind(subId).first();
+          if(account)await syncSubscription(env,account.user_id,subId,fetcher);}
+      }
+      await db.prepare("INSERT INTO stripe_events(id,event_type,processed_at) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING").bind(event.id,event.type,Date.now()).run();
       return json({ received: true });
+      } catch(error) {
+        throw error;
+      }
     }
     if (!["GET", "HEAD"].includes(method)) {
       const origin = req.headers.get("origin");
@@ -364,13 +380,16 @@ export async function handle(
             "An account already uses this email. Try logging in.",
           );
         const salt = crypto.randomUUID();
+        const username = string(b.username, 24, "Username", 3);
+        if (!/^[a-zA-Z0-9_]+$/.test(username)) fail(400, "INVALID_USERNAME", "Use letters, numbers, and underscores for your username.");
+        if (await db.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE").bind(username).first()) fail(409, "USERNAME_TAKEN", "That username is already taken.");
         const id = crypto.randomUUID();
         const digest = await passwordHash(password, salt);
         await db
           .prepare(
-            "INSERT INTO users (id,email,password,salt,legal_version,legal_accepted_at) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO users (id,email,password,salt,legal_version,legal_accepted_at,username) VALUES (?,?,?,?,?,?,?)",
           )
-          .bind(id, email, digest, salt, LEGAL_VERSION, Date.now())
+          .bind(id, email, digest, salt, LEGAL_VERSION, Date.now(), username)
           .run();
         user = { id, email };
       } else {
@@ -391,6 +410,30 @@ export async function handle(
       });
     }
     const user = await requireUser(req, db);
+    if (path[0] === "profile" && method === "PATCH") {
+      const b = await body(req);
+      const username = string(b.username, 24, "Username", 3);
+      if (!/^[a-zA-Z0-9_]+$/.test(username)) fail(400, "INVALID_USERNAME", "Use letters, numbers, and underscores.");
+      const color = ["violet", "blue", "rose", "green", "amber"].includes(b.avatarColor) ? b.avatarColor : "violet";
+      if (await db.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE AND id<>?").bind(username,user.id).first()) fail(409,"USERNAME_TAKEN","That username is already taken.");
+      await db.prepare("UPDATE users SET username=?,avatar_color=? WHERE id=?").bind(username,color,user.id).run();
+      return json({ok:true});
+    }
+    if (path[0] === "security" && method === "POST") {
+      const b = await body(req);
+      if (!(await consume(db, `security:${user.id}:${Math.floor(Date.now()/600000)}`, 5))) fail(429,"RATE_LIMIT","Wait a few minutes before trying again.");
+      const record = await db.prepare("SELECT password,salt FROM users WHERE id=?").bind(user.id).first();
+      const current = string(b.currentPassword,128,"Current password");
+      if (!equal(await passwordHash(current,record.salt),record.password)) fail(400,"INVALID_PASSWORD","Your current password is incorrect.");
+      if (b.action === "password") {
+        const next = string(b.newPassword,128,"New password",12), salt = crypto.randomUUID();
+        await db.batch([db.prepare("UPDATE users SET password=?,salt=? WHERE id=?").bind(await passwordHash(next,salt),salt,user.id),db.prepare("DELETE FROM sessions WHERE user_id=?").bind(user.id)]);
+      } else if (b.action === "sessions") {
+        const token = req.headers.get("cookie")?.match(/(?:^|;\s*)spark_session=([a-f0-9-]+)/)?.[1] || "";
+        await db.prepare("DELETE FROM sessions WHERE user_id=? AND token<>?").bind(user.id,await hash(token)).run();
+      } else fail(400,"INVALID_INPUT","Choose a security action.");
+      return json({ok:true});
+    }
     if (path[0] === "auth" && path[1] === "logout" && method === "POST") {
       const token = req.headers
         .get("cookie")
@@ -404,8 +447,16 @@ export async function handle(
         "Set-Cookie": `spark_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${url.protocol === "https:" ? "; Secure" : ""}`,
       });
     }
-    if (path[0] === "me" && method === "GET")
-      return json({ user, aiConfigured: !!env.OPENAI_API_KEY });
+    if (path[0] === "me" && method === "GET") {
+      const billing=await balance(env,user.id,fetcher);
+      return json({ user:{...user,workspace_enabled:billing.active||billing.credits>0?1:0}, billing, aiConfigured: !!env.OPENAI_API_KEY });
+    }
+    if(path[0]==="billing"&&path[1]==="portal"&&method==="POST") {
+      const account=await db.prepare("SELECT stripe_customer_id FROM billing_accounts WHERE user_id=?").bind(user.id).first();
+      if(!account?.stripe_customer_id)fail(400,"NO_SUBSCRIPTION","Choose a subscription first.");
+      const session=await stripe(env,"billing_portal/sessions",fetcher,new URLSearchParams({customer:account.stripe_customer_id,return_url:`${url.origin}/account?tab=billing`}));
+      return json({url:session.url});
+    }
     if (path[0] === "billing" && path[1] === "checkout" && method === "POST") {
       const b = await body(req);
       const params = new URLSearchParams({
@@ -417,6 +468,8 @@ export async function handle(
         "metadata[user_id]": user.id,
       });
       if (b.kind === "plan") {
+        const current=await balance(env,user.id,fetcher);
+        if(current.active)fail(409,"ALREADY_SUBSCRIBED","Manage your existing subscription from your account to avoid paying twice.");
         const plan = plans.find((item) => item.id === b.planId);
         const period = b.period === "yearly" ? "yearly" : "monthly";
         if (!plan) fail(400, "INVALID_PLAN", "Choose a valid plan.");
@@ -438,8 +491,10 @@ export async function handle(
     }
     // Preview access is closed until verified payment provisioning is connected.
     // There is intentionally no browser/API endpoint that grants this flag.
-    if (path[0] === "projects" && user.workspace_enabled !== 1)
-      fail(402, "PLAN_REQUIRED", "Choose a plan or credit pack to unlock Spark. Payments are coming soon.");
+    if (path[0] === "projects") {
+      const billing=await balance(env,user.id,fetcher);
+      if(!billing.active&&billing.credits<=0)fail(402,"PLAN_REQUIRED","Choose a plan or add credits to continue building.");
+    }
     if (path[0] === "projects" && !path[1]) {
       if (method === "GET")
         return json({
@@ -642,8 +697,16 @@ export async function handle(
               context.at(-1).content += "\n\n" + row.content;
             else context.push({ ...row });
           }
-          const answer = await callOpenAI(env, context, project, fetcher);
-          await db.batch([
+          const maxOutput=Math.min(4096,Math.max(256,Number(env.AI_MAX_OUTPUT_TOKENS)||2048));
+          // Reserve against a conservative token upper bound, then charge reported usage.
+          const maximum=Math.ceil((encoder.encode(JSON.stringify(context)+JSON.stringify(project)).length+2000+maxOutput*5)/1000);
+          let parts:any[];
+          try{parts=await reserve(db,user.id,id,maximum);}catch(e){fail(402,"SPARK_CREDITS_REQUIRED",e instanceof Error?e.message:"Add Spark Credits to continue.");}
+          let usage:any,answer:string;
+          try{answer=await callOpenAI(env,context,project,fetcher,u=>{usage=u;});}
+          catch(e){await settle(db,user.id,id,parts!,0);throw e;}
+          const cost=Math.min(maximum,Math.max(1,Math.ceil(((Number(usage?.input_tokens)||Math.ceil(size/3))+(Number(usage?.output_tokens)||Math.ceil(answer.length/3))*5)/1000)));
+          await settle(db,user.id,id,parts!,cost,[
             db
               .prepare(
                 "INSERT INTO messages (id,project_id,role,content,created) VALUES (?,?,'assistant',?,?)",
@@ -675,6 +738,8 @@ export async function handle(
     }
     fail(404, "NOT_FOUND", "Not found.");
   } catch (error) {
+    if (String(error instanceof Error ? error.message : error).includes("USERNAME_TAKEN"))
+      return json({ error: "That username is already taken.", code: "USERNAME_TAKEN" }, 409);
     if (error instanceof ApiError)
       return json({ error: error.message, code: error.code }, error.status);
     console.error(
