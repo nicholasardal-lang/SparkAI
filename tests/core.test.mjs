@@ -328,6 +328,8 @@ check(historyResult.status === 200, "Failed and unanswered prompts do not contam
 let unauthorizedCalls=0;
 const rejectedQuote=await request("projects/"+id+"/messages","POST",{content:"Design a secure trading system",requestId:crypto.randomUUID(),model:"gpt-5-mini",maxCredits:1},a.cookie,async()=>{unauthorizedCalls++;return Response.json({output_text:"unexpected"});});
 check(rejectedQuote.data.code==="QUOTE_CHANGED" && unauthorizedCalls===0,"Client cannot force a cheaper model or bypass the credit quote");
+const afterRejectedQuote=await request("projects/"+id,"GET",undefined,a.cookie);
+check(!afterRejectedQuote.data.messages.some(m=>m.content==="Design a secure trading system"),"Unaccepted quotes do not create unanswered messages");
 check(selectModel("Give me five obby ideas").model==="gpt-5-mini","Short planning routes to mini");
 check(selectModel("Plan a five-stage obby. No code yet.").model==="gpt-5-mini","Asking for no code does not trigger a coding model");
 check(selectModel("Audit this trading system for a race condition").model==="gpt-6-astra","Complex debugging routes to Astra even in a short prompt");

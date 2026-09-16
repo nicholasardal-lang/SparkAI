@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {modelCredits,selectModel,usageMetrics} from '../lib/spark/models.ts';
+import {creditQuote} from '../lib/spark/core.ts';
+assert.equal(selectModel('Write a checkpoint script',29000).model,'gpt-5.6-terra');
+assert.equal(selectModel('Explain what a checkpoint is',29000).model,'gpt-5-mini');
+assert.equal(selectModel('Audit an inventory system for duplication exploits',0).model,'gpt-6-astra');
+assert.equal(modelCredits('gpt-5.6-terra',10000,1000),110);
+assert.equal(modelCredits('gpt-5.6-terra',10000,1000,10000),38);
+const usage=usageMetrics('gpt-5.6-terra',{input_tokens:10000,output_tokens:1000,input_tokens_details:{cached_tokens:8000},output_tokens_details:{reasoning_tokens:200}});
+assert.equal(usage.estimatedProviderUsd,.0176);
+assert.equal(usage.reasoningTokens,200); // Already included in output; never bill twice.
+assert.equal(usageMetrics('gpt-5.6-terra',{input_tokens:10,input_tokens_details:{cached_tokens:999}}).cachedTokens,10);
+const context=[{role:'user',content:'Make an obby'},{role:'assistant',content:'x'.repeat(24000)},{role:'user',content:'Create a cat that jumps when you click a button'}];
+const quote=creditQuote({},context,{name:'Test'});
+assert.equal(quote.selection.model,'gpt-5.6-terra');
+assert.ok(quote.estimatedCredits<200);
+assert.ok(quote.maxCredits<300);
+assert.ok(quote.estimatedCredits<=quote.maxCredits);
+assert.equal(creditQuote({AI_MAX_OUTPUT_TOKENS:'256'},context,{}).estimatedCredits<=quote.estimatedCredits,true);
+console.log('Usage arithmetic, cached-input discounts, reasoning accounting and long-chat quotes passed.');

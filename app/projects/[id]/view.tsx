@@ -132,12 +132,12 @@ export default function Workspace({ id }: { id: string }) {
     if (!draft.trim()) return;
     const content=draft.trim();
     const timer=setTimeout(() => {
-      api("projects/"+id+"/estimate","POST",{content}).then(result => {
+      api("projects/"+id+"/estimate","POST",{content,requestId:retry?.content===content?retry.requestId:undefined}).then(result => {
         if(!cancelled) setQuote({...result,content});
       }).catch(e => { if(!cancelled) setQuoteError(e.message); });
     },400);
     return () => {cancelled=true;clearTimeout(timer);};
-  },[draft,id,data?.messages?.length]);
+  },[draft,id,data?.messages?.length,retry?.requestId]);
   useEffect(() => {
     setTakingLonger(false);
     if (!busy) return;
@@ -160,16 +160,21 @@ export default function Workspace({ id }: { id: string }) {
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }, [data?.messages?.length, busy]);
-  async function send(retrying?: any) {
+  function editFailed(request:any) {
+    setRetry(request);setDraft(request.content);setError("");
+    document.getElementById("message")?.focus();
+  }
+  async function send() {
     if (sending.current) return;
-    const content = retrying?.content || draft.trim();
+    const content = draft.trim();
+    const retrying = retry?.content===content ? retry : null;
     if (!content) return;
     if (!quote || quote.content!==content) {
       try {
         const result=await api("projects/"+id+"/estimate","POST",{content,requestId:retrying?.requestId});
         setQuote({...result,content});
         setRetry(retrying || {content,requestId:crypto.randomUUID()});
-        setError("Review the credit estimate below, then press Retry to send.");
+        setError("Review the credit estimate below, then press Send.");
       } catch(e:any) {setError(e.message);}
       return;
     }
@@ -178,13 +183,14 @@ export default function Workspace({ id }: { id: string }) {
     setError("");
     const request = retrying || { content, requestId: crypto.randomUUID() };
     setRetry(request);
-    if (!retrying) setDraft("");
+    setDraft("");
     setData((current: any) => current && ({...current, messages: current.messages.some((m: any) => m.id === request.requestId) ? current.messages : [...current.messages, {id: request.requestId, role: "user", content}]}));
     try {
       await api("projects/" + id + "/messages", "POST", {...request,model:quote.model,maxCredits:quote.maxCredits});
       setRetry(null);
     } catch (e: any) {
       setError(e.message);
+      setDraft(current => current || content);
       if(e.code==="QUOTE_CHANGED") setQuote(null);
       if (
         ![
@@ -313,7 +319,7 @@ export default function Workspace({ id }: { id: string }) {
                     <Markdown text={m.content} />
                   </>
                 ) : (
-                  m.content
+                  <>{m.content}{!busy && data.requests?.some((r:any)=>r.id===m.id) && <div className="notice" style={{marginTop:12}}><span>Spark hasn’t completed this reply.</span>{" "}<button onClick={()=>editFailed({content:m.content,requestId:m.id})}>Edit and send again</button></div>}</>
                 )}
               </article>
             ))
@@ -335,40 +341,12 @@ export default function Workspace({ id }: { id: string }) {
             {error && (
               <div className="error" role="alert">
                 {error}{" "}
-                {retry && (
-                  <button
-                    disabled={busy}
-                    onClick={() => send(retry)}
-                    style={{ textDecoration: "underline" }}
-                  >
-                    Retry message
-                  </button>
-                )}
+
               </div>
-            )}
-            {!busy && data.requests?.length > 0 && (
-              <details className="muted">
-                <summary>
-                  Messages awaiting a response ({data.requests.length})
-                </summary>
-                {data.requests.map((r: any) => (
-                  <div key={r.id} style={{ margin: "7px 0" }}>
-                    {r.content.slice(0, 70)}{" "}
-                    <button
-                      onClick={() =>
-                        send({ content: r.content, requestId: r.id })
-                      }
-                      style={{ color: "#A78BFA" }}
-                    >
-                      Retry
-                    </button>
-                  </div>
-                ))}
-              </details>
             )}
             {quote && (
               <div className="usage-estimate" role="status">
-                Estimated {quote.estimatedCredits.toLocaleString()} Spark Credits; up to {quote.maxCredits.toLocaleString()} reserved. You pay for actual usage; unused credits are returned.
+                About {quote.estimatedCredits.toLocaleString()} Spark Credits · Maximum {quote.maxCredits.toLocaleString()}. Only actual usage is charged; unused reserved credits return automatically.
               </div>
             )}
             {draft.trim() && !quote && <p className="muted" role="status">{quoteError || "Estimating credit usage…"}</p>}
@@ -386,7 +364,7 @@ export default function Workspace({ id }: { id: string }) {
                 id="message"
                 value={draft}
                 maxLength={8000}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {setDraft(e.target.value);if(retry && e.target.value.trim()!==retry.content)setRetry(null);}}
                 placeholder="What would you like to build?"
                 onKeyDown={(e) => {
                   if (
