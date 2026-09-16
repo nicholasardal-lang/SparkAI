@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { handle, providerError, callOpenAI } from "../lib/spark/core.ts";
 import { balance, syncSubscription, reserve, settle, monthAt } from "../lib/spark/billing.ts";
+import { selectModel, modelCredits } from "../lib/spark/models.ts";
 const sqlite = new DatabaseSync(":memory:");
 sqlite.exec("PRAGMA foreign_keys=ON");
 for (const file of readdirSync(new URL("../drizzle/", import.meta.url)).filter(name => name.endsWith(".sql")).sort()) {
@@ -304,6 +305,26 @@ const foreign = await handle(
   env,
 );
 check(foreign.status === 403, "Cross-origin mutation rejected");
+env.DAILY_MESSAGE_LIMIT = "30";
+const quote = await request("projects/" + id + "/estimate", "POST", {content:"debug checkpoint"}, a.cookie);
+check(quote.data.model === "gpt-5.6-terra", "Estimate selects Terra for focused debugging");
+const historyResult = await request("projects/" + id + "/messages", "POST",
+  { content: "debug checkpoint", requestId: crypto.randomUUID(), model:quote.data.model,maxCredits:quote.data.maxCredits }, a.cookie,
+  async (url, options) => {
+    const payload = JSON.parse(options.body);
+    assert.ok(payload.input.some(m => m.content.includes("Test fixture response")));
+    assert.ok(!payload.input.some(m => m.content.includes("another checkpoint") || m.content.includes("checkpoint again")));
+    return Response.json({ output_text: "Only answered history was included." });
+  });
+check(historyResult.status === 200, "Failed and unanswered prompts do not contaminate new requests");
+let unauthorizedCalls=0;
+const rejectedQuote=await request("projects/"+id+"/messages","POST",{content:"Design a secure trading system",requestId:crypto.randomUUID(),model:"gpt-5-mini",maxCredits:1},a.cookie,async()=>{unauthorizedCalls++;return Response.json({output_text:"unexpected"});});
+check(rejectedQuote.data.code==="QUOTE_CHANGED" && unauthorizedCalls===0,"Client cannot force a cheaper model or bypass the credit quote");
+check(selectModel("Give me five obby ideas").model==="gpt-5-mini","Short planning routes to mini");
+check(selectModel("Plan a five-stage obby. No code yet.").model==="gpt-5-mini","Asking for no code does not trigger a coding model");
+check(selectModel("Audit this trading system for a race condition").model==="gpt-6-astra","Complex debugging routes to Astra even in a short prompt");
+check(selectModel("x".repeat(4500)).model==="gpt-6-astra","Large requests route to Astra");
+check(modelCredits("gpt-6-astra",1000,1000)>modelCredits("gpt-5.6-terra",1000,1000) && modelCredits("gpt-5.6-terra",1000,1000)>modelCredits("gpt-5-mini",1000,1000),"Credits account for the selected model's cost");
 check(
   (await request("projects/" + id, "DELETE", {}, a.cookie)).status === 200,
   "Delete project",
@@ -327,6 +348,37 @@ const partial = await callOpenAI({ OPENAI_API_KEY: "fixture" }, [], {}, async ()
 check(partial.includes("\n```\n\n*Response reached"), "Truncated code is closed and labelled incomplete");
 await assert.rejects(() => callOpenAI({ OPENAI_API_KEY: "fixture" }, [], {}, async () => Response.json({ status: "incomplete", output: [] })), (error) => error.code === "INCOMPLETE_RESPONSE");
 check(true, "Empty incomplete replies return actionable errors");
+let networkCalls = 0;
+await assert.rejects(() => callOpenAI({}, [], {}, async () => {
+  networkCalls++;
+  throw new TypeError("connection reset");
+}), error => error.code === "NETWORK_ERROR");
+check(networkCalls === 1, "Ambiguous network failures are never automatically retried");
+let bodyCalls = 0;
+await assert.rejects(() => callOpenAI({}, [], {}, async () => {
+  bodyCalls++;
+  return { json: async () => { throw new DOMException("deadline", "TimeoutError"); } };
+}), error => error.code === "AI_TIMEOUT" && error.status === 504);
+check(bodyCalls === 1, "Response-body timeouts are classified and never automatically retried");
+const savedTimeout = AbortSignal.timeout;
+let deadlineCalls = 0, deadlineSignals = [];
+try {
+  AbortSignal.timeout = milliseconds => {
+    assert.equal(milliseconds, 60000);
+    deadlineCalls++;
+    return savedTimeout(milliseconds);
+  };
+  const reply = await callOpenAI({}, [], {}, async (url, options) => {
+    deadlineSignals.push(options.signal);
+    const payload = JSON.parse(options.body);
+    assert.equal(payload.model, "gpt-5-mini");
+    assert.equal(payload.reasoning.effort, "low");
+    assert.equal(payload.max_output_tokens, 4096);
+    return deadlineSignals.length === 1 ? Response.json({}, { status: 503 }) : Response.json({ output_text: "Recovered" });
+  });
+  assert.equal(reply, "Recovered");
+} finally { AbortSignal.timeout = savedTimeout; }
+check(deadlineCalls === 1 && deadlineSignals[0] === deadlineSignals[1], "Provider retries share one deadline within both request locks");
 console.log(
   `${checks} checks passed. Provider responses were test fixtures, never live OpenAI.`,
 );

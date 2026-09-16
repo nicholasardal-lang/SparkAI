@@ -98,10 +98,32 @@ export default function Workspace({ id }: { id: string }) {
     [draft, setDraft] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
+    [takingLonger, setTakingLonger] = useState(false),
+    [quote, setQuote] = useState<any>(null),
+    [quoteError, setQuoteError] = useState(""),
     [scriptsOpen, setScriptsOpen] = useState(false),
     [retry, setRetry] = useState<any>(null);
   const sending = useRef(false),
     end = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let cancelled=false;
+    setQuote(null);
+    setQuoteError("");
+    if (!draft.trim()) return;
+    const content=draft.trim();
+    const timer=setTimeout(() => {
+      api("projects/"+id+"/estimate","POST",{content}).then(result => {
+        if(!cancelled) setQuote({...result,content});
+      }).catch(e => { if(!cancelled) setQuoteError(e.message); });
+    },400);
+    return () => {cancelled=true;clearTimeout(timer);};
+  },[draft,id,data?.messages?.length]);
+  useEffect(() => {
+    setTakingLonger(false);
+    if (!busy) return;
+    const timer = setTimeout(() => setTakingLonger(true), 15000);
+    return () => clearTimeout(timer);
+  }, [busy]);
   async function load() {
     const result = await api("projects/" + id);
     setData(result);
@@ -122,17 +144,27 @@ export default function Workspace({ id }: { id: string }) {
     if (sending.current) return;
     const content = retrying?.content || draft.trim();
     if (!content) return;
+    if (!quote || quote.content!==content) {
+      try {
+        const result=await api("projects/"+id+"/estimate","POST",{content,requestId:retrying?.requestId});
+        setQuote({...result,content});
+        setRetry(retrying || {content,requestId:crypto.randomUUID()});
+        setError("Review the model and credit estimate below, then press Retry to send.");
+      } catch(e:any) {setError(e.message);}
+      return;
+    }
     sending.current = true;
     setBusy(true);
     setError("");
     const request = retrying || { content, requestId: crypto.randomUUID() };
     setRetry(request);
     try {
-      await api("projects/" + id + "/messages", "POST", request);
+      await api("projects/" + id + "/messages", "POST", {...request,model:quote.model,maxCredits:quote.maxCredits});
       setDraft((current) => current.trim() === content ? "" : current);
       setRetry(null);
     } catch (e: any) {
       setError(e.message);
+      if(e.code==="QUOTE_CHANGED") setQuote(null);
       if (
         ![
           "AI_SETUP_REQUIRED",
@@ -166,9 +198,6 @@ export default function Workspace({ id }: { id: string }) {
         (match: any) => match[1],
       ),
     );
-  const estimatedCredits = draft.trim().length > 900
-    ? Math.max(1, Math.ceil((draft.trim().length + 2000 + 2048 * 5) / 1000))
-    : 0;
   return (
     <SidebarProvider>
       <Sidebar>
@@ -273,7 +302,7 @@ export default function Workspace({ id }: { id: string }) {
           )}
           {busy && (
             <p className="muted" role="status">
-              ✦ Spark is working on your idea…
+              {takingLonger ? "✦ Still working — larger scripts can take up to a minute. Please keep this page open." : "✦ Spark is working on your idea…"}
             </p>
           )}
           <div ref={end} />
@@ -319,11 +348,12 @@ export default function Workspace({ id }: { id: string }) {
                 ))}
               </details>
             )}
-            {estimatedCredits > 0 && (
+            {quote && (
               <div className="usage-estimate" role="status">
-                Estimated usage: about {estimatedCredits.toLocaleString()} Spark Credits. Actual usage can vary with conversation context and response length.
+                Auto · {quote.label} — {quote.reason}. Estimated {quote.estimatedCredits.toLocaleString()} Spark Credits; up to {quote.maxCredits.toLocaleString()} reserved. You pay for actual usage; unused credits are returned.
               </div>
             )}
+            {draft.trim() && !quote && <p className="muted" role="status">{quoteError || "Checking model and credit estimate…"}</p>}
             <form
               className="composer"
               onSubmit={(e) => {
@@ -358,7 +388,7 @@ export default function Workspace({ id }: { id: string }) {
                 <button
                   className="button"
                   aria-label="Send message"
-                  disabled={busy || !draft.trim()}
+                  disabled={busy || !draft.trim() || !quote || quote.content!==draft.trim()}
                 >
                   <ArrowUp size={18} />
                 </button>

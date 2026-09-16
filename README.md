@@ -13,10 +13,10 @@ Click **Get started**, create an account with a unique username, an email addres
 1. Create or open an OpenAI API account at https://platform.openai.com/. API usage requires billing credits; a ChatGPT subscription is separate from API usage.
 2. Create an API key there. Never paste it into a chat conversation, a browser-facing app field, or a source file that will be shared.
 3. In your hosting service's server-side environment settings, set **OPENAI_API_KEY** as a **secret**. For Sites, use its runtime environment-variable controls with the secret flag, then redeploy the saved version to apply it. If those controls are unavailable in your interface, use the local setup below; do not put the key in a conversation as a workaround.
-4. Leave **OPENAI_MODEL** at `gpt-5-mini`, or change it to a model your OpenAI account supports.
+4. Leave **OPENAI_MODEL** unset or `auto` for automatic routing between `gpt-5-mini`, `gpt-5.6-terra`, and `gpt-6-astra`. A supported model ID pins the server to that model.
 5. Reload Spark and retry a saved message. No provider is used as a fallback.
 
-The chosen model is `gpt-5-mini`, called through OpenAI's Responses API. Check current OpenAI model pricing before enabling billing. Spark sets `store: false` and keeps conversation history in its own database. Conversation context is included in each request, which contributes to cost. Local development does not require paid hosting. Hosting plan limits and fees depend on the provider; no subscription or API credit purchase was made during this build.
+Spark uses OpenAI's Responses API with low reasoning effort. Its initial rules route short planning to GPT-5 mini, ordinary coding to GPT-5.6 Terra, and complex systems, extensive code, or difficult debugging to GPT-6 Astra. This is a deterministic heuristic, not a learned classifier. The server quotes the selected model and estimated/max credits before sending; actual token usage determines the charge using model-specific weights. Rates are in `lib/spark/models.ts` and require review when provider pricing changes. Spark sets `store: false` and includes only answered conversation history plus the current prompt. All provider attempts and response-body reads share a 60-second deadline, within the 90-second project lock and 120-second credit reservation. Timeouts and ambiguous network errors are not automatically retried. Logs include model, duration, status, and provider request ID, never prompts or secrets.
 
 ## Run on your computer
 
@@ -38,9 +38,9 @@ To configure local AI, copy `.env.example` to `.env`, then privately edit the bl
 | Server setting         | Default             | Behavior                                                         |
 | ---------------------- | ------------------- | ---------------------------------------------------------------- |
 | `OPENAI_API_KEY`       | Empty               | AI disabled; accounts, projects, and messages still work         |
-| `OPENAI_MODEL`         | `gpt-5-mini`        | Backend-only configurable model                                  |
+| `OPENAI_MODEL`         | `auto`              | Automatic routing, or a supported model ID to pin all requests    |
 | `DAILY_MESSAGE_LIMIT`  | `30`                | Per-account AI requests per UTC day; bounded between 1 and 1,000 |
-| `AI_MAX_OUTPUT_TOKENS` | `2048`              | Per-response output limit; bounded between 256 and 4,096         |
+| `AI_MAX_OUTPUT_TOKENS` | `4096`              | Per-response output limit including reasoning; bounded between 256 and 4,096 |
 | `RESEND_API_KEY`       | Empty               | Server-side key for verification and password recovery email    |
 | `EMAIL_FROM`           | Empty               | Verified sender address used by the email provider              |
 | `APP_ORIGIN`           | Request origin      | Public origin used in links sent by email                       |
