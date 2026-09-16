@@ -149,7 +149,7 @@ export default function Workspace({ id }: { id: string }) {
         const result=await api("projects/"+id+"/estimate","POST",{content,requestId:retrying?.requestId});
         setQuote({...result,content});
         setRetry(retrying || {content,requestId:crypto.randomUUID()});
-        setError("Review the model and credit estimate below, then press Retry to send.");
+        setError("Review the credit estimate below, then press Retry to send.");
       } catch(e:any) {setError(e.message);}
       return;
     }
@@ -350,10 +350,10 @@ export default function Workspace({ id }: { id: string }) {
             )}
             {quote && (
               <div className="usage-estimate" role="status">
-                Auto · {quote.label} — {quote.reason}. Estimated {quote.estimatedCredits.toLocaleString()} Spark Credits; up to {quote.maxCredits.toLocaleString()} reserved. You pay for actual usage; unused credits are returned.
+                Estimated {quote.estimatedCredits.toLocaleString()} Spark Credits; up to {quote.maxCredits.toLocaleString()} reserved. You pay for actual usage; unused credits are returned.
               </div>
             )}
-            {draft.trim() && !quote && <p className="muted" role="status">{quoteError || "Checking model and credit estimate…"}</p>}
+            {draft.trim() && !quote && <p className="muted" role="status">{quoteError || "Estimating credit usage…"}</p>}
             <form
               className="composer"
               onSubmit={(e) => {
