@@ -21,14 +21,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "../../auth-form";
 import ProjectActions from "../../project-actions";
 import { readIdea, clearIdea } from "@/lib/spark/draft";
-import { extractFiles, modelFile, scriptFile, scriptModel, type SparkFile } from "@/lib/spark/artifacts";
+import { extractFiles, modelFile, scriptFile, scriptModel, normalizeArtifactMarkdown, type SparkFile } from "@/lib/spark/artifacts";
 function downloadFile(name:string, content:string) {
   const url=URL.createObjectURL(new Blob([content],{type:"text/plain;charset=utf-8"}));
   const link=document.createElement("a"); link.href=url; link.download=name; link.click();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function FileCard({file}:{file:SparkFile}) {
-  return <section className="code-block"><header><strong>{file.name}</strong><button onClick={()=>downloadFile(file.name,file.content)}>Download</button></header><div style={{padding:"12px 16px"}}><p>{file.kind==="model"?"Roblox model · anchored parts":file.scriptType} · {file.location}</p>{file.kind==="model"?<p>In Studio Explorer, right-click Workspace → Insert from File / Import Roblox Model. Select this file, then move and test the model.</p>:<><p>Create the matching script type at the location above and paste the downloaded source. Or import the Studio file below at that location, review it, then enable the script.</p><button onClick={()=>downloadFile(file.name.replace(/\.luau$/,".rbxmx"),scriptModel(file))}>Download Studio file (.rbxmx)</button></>}</div></section>;
+  const name=file.kind==="model"?file.name:file.name.replace(/\.luau$/,".rbxmx");
+  return <section className="code-block"><header style={{flexWrap:"wrap",gap:12}}><strong style={{overflowWrap:"anywhere"}}>{name}</strong><button className="button" onClick={()=>downloadFile(name,file.kind==="model"?file.content:scriptModel(file))}>Download for Roblox</button></header><div style={{padding:"12px 16px"}}><p><strong>Put it in:</strong> {file.location}</p><ol><li>Download the file above.</li><li>In Roblox Studio’s Explorer, right-click {file.kind==="model"?"Workspace":"the location above"} → Insert from File / Import Roblox Model.</li><li>{file.kind==="model"?"Choose the file, then press Play to try the build.":"Choose the file. Review the code, then turn off Disabled in Properties to enable it (ModuleScripts run when required)."}</li></ol>{file.kind==="script"&&<details><summary>View code & source download</summary><button onClick={()=>downloadFile(file.name,file.source)}>Download .luau source</button><Code code={file.source} downloadable={false}/></details>}</div></section>;
 }
 function ModelCard({source}:{source:string}) {
   try {return <FileCard file={modelFile(source)}/>;} catch {return <p className="error">This model could not be exported. Ask Spark to regenerate a complete model with supported parts.</p>;}
@@ -86,6 +87,7 @@ function Markdown({ text }: { text: string }) {
           code: ({ children, className, node, ...props }) => {
             const content = String(children);
             if(className === "language-spark-model") return complete ? <ModelCard source={content}/> : <p className="notice">The model is incomplete. Ask Spark to regenerate a smaller complete model before downloading.</p>;
+            if(complete && ["language-luau","language-lua"].includes(className||"")) return <FileCard file={scriptFile(content)}/>;
             return className?.startsWith("language-") ||
               content.includes("\n") ? (
               <Code
@@ -105,7 +107,7 @@ function Markdown({ text }: { text: string }) {
           img: () => null,
         }}
       >
-        {text}
+        {normalizeArtifactMarkdown(text)}
       </ReactMarkdown>
     </div>
   );

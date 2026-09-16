@@ -29,10 +29,39 @@ export function scriptModel(file:SparkFile):string {
   if(file.kind!=="script" || !["Script","LocalScript","ModuleScript"].includes(file.scriptType||"")) throw new Error("Not a script file");
   return document(`<Item class="${file.scriptType}" referent="RBX0"><Properties><string name="Name">${xml(file.name.replace(/\.(?:server\.|client\.)?luau$/,""))}</string><ProtectedString name="Source">${xml(file.source)}</ProtectedString>${file.scriptType==="ModuleScript"?"":'<bool name="Disabled">true</bool>'}</Properties></Item>`);
 }
+// Recover model payloads from older replies without executing or trusting them.
+export function normalizeArtifactMarkdown(text:string):string {
+  const recover=(chunk:string):string=>{
+    let out="",start=0;
+    for(let i=0;i<chunk.length;i++) {
+      if(chunk[i]!=="{") continue;
+      let depth=0,quoted=false,escaped=false,end=-1;
+      for(let j=i;j<chunk.length;j++) {
+        const c=chunk[j];
+        if(quoted){if(escaped)escaped=false;else if(c==="\\")escaped=true;else if(c==='"')quoted=false;continue;}
+        if(c==='"')quoted=true;
+        else if(c==="{")depth++;
+        else if(c==="}"&&--depth===0){end=j+1;break;}
+      }
+      if(end<0) break;
+      const raw=chunk.slice(i,end);
+      try { const value=JSON.parse(raw); if(value&&typeof value.name==="string"&&Array.isArray(value.parts)) {
+        out+=chunk.slice(start,i)+"\n\n```spark-model\n"+raw+"\n```\n\n";start=end;i=end-1;
+      }} catch { /* Ordinary prose is preserved. */ }
+    }
+    return out+chunk.slice(start);
+  };
+  return text.split(/(```[^\n]*\n[\s\S]*?```)/g).map(chunk=>{
+    if(!chunk.startsWith("```")) return recover(chunk);
+    const match=chunk.match(/^```(?:json)?\s*\n([\s\S]*?)```$/i);
+    if(!match)return chunk;
+    const recovered=recover(match[1]);return recovered.includes("```spark-model")?recovered:chunk;
+  }).join("");
+}
 export function extractFiles(text:string):SparkFile[] {
   if(text.includes("Response reached its length limit") || text.includes("This response is incomplete")) return [];
   const files:SparkFile[]=[];
-  for(const match of text.matchAll(/```(luau|lua|spark-model)\s*\n([\s\S]*?)```/g)) {
+  for(const match of normalizeArtifactMarkdown(text).matchAll(/```(luau|lua|spark-model)\s*\n([\s\S]*?)```/g)) {
     try {files.push(match[1]==="spark-model"?modelFile(match[2]):scriptFile(match[2],files.length+1));} catch { /* Invalid models remain visible with a regeneration instruction. */ }
   }
   return files;

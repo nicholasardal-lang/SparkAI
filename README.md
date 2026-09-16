@@ -86,6 +86,12 @@ The core suite uses an isolated SQLite database and a clearly marked mock provid
 Stack: React, TypeScript, Vinext/Vite, a Cloudflare-compatible Worker, and D1 SQLite. The backend is included in this source, not a separate unimplemented service.
 # Manual Roblox exports and temporary email policy
 
+## Beginner generation quality
+
+Build requests use a strict Responses API JSON schema, server-side artifact validation, and app-rendered download cards. Plain JSON and JSON-fenced models in older messages are recovered into the same cards without changing saved history. Runnable script downloads use Roblox files by default; source is collapsed under View code. Broad build prompts route to at least Terra, while planning remains lightweight. The prompt asks for compact usable builds, reachable beginner geometry, and honest limits for static models.
+
+Generation configuration is versioned in `lib/spark/generation.ts`. Run `node --test tests/generation.test.mjs tests/artifacts.test.mjs tests/core.test.mjs` for regression checks. With an API key set privately, `node scripts/evaluate-generation.mjs` runs three paid representative prompts and writes an ignored report to `work/generation-evaluation.json`. Review the report for clarity, usable files and behavior claims; import representative files into Studio before declaring gameplay validated. Compare reports when changing models or prompts. This is an evaluation loop, not automatic learning from user conversations.
+
 Email verification is paused by default (`REQUIRE_EMAIL_VERIFICATION=false`). Existing and new accounts can log in without delivery; addresses are not marked verified. Paid access and credit enforcement remain enabled. Re-enable verification explicitly only after email delivery is configured. Password recovery shows an unavailable message when email delivery is not configured.
 
 The chat immediately displays a submitted message and clears the composer, then shows a working state. Saved requests retain retry protection.

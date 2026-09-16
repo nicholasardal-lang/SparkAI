@@ -206,7 +206,7 @@ check(
   "Rename project",
 );
 const rid = crypto.randomUUID();
-const message = { content: "Build a checkpoint", requestId: rid };
+const message = { content: "Explain checkpoint behavior", requestId: rid };
 const missing = await request(
   "projects/" + id + "/messages",
   "POST",
