@@ -1,5 +1,33 @@
 # AI quality and usage baseline — September 16, 2026
 
+## Follow-up pass: beginner-build-v4
+
+Files now carry readable titles, including backward-compatible titles for older
+files, while technical download names remain stable. The drawer sorts newest
+first and cards no longer shrink inside its scrolling flex layout. The structured
+contract requires titles and rejects duplicate asset/part names. NPCs, shops,
+weapons, UI buttons and similar build requests now enter the structured build path.
+
+Removed redundant Markdown-format instructions from structured generation. Added
+small self-contained playable-course guidance, explicit checkpoint spawn rules,
+per-body-part lava contact tracking and complete replacement-file instructions.
+Roblox spawn constraints were checked against
+https://create.roblox.com/docs/reference/engine/classes/Player/RespawnLocation .
+
+`scripts/evaluate-followups.mjs` is an explicitly paid regression that generates a
+lava obby with a checkpoint, then changes lava to damage over time. It checks file
+titles, stable replacement names and explicit neutral spawn/RespawnLocation code.
+These are static checks, not a Luau execution test. Review generated code as well.
+
+Final live results: initial build 10.2s, 1205 input / 1067 output tokens, estimated
+$0.015214; follow-up 15.8s, 2224 input / 1732 output, 1202 cached input, estimated
+$0.0230684. Both produced `BeginnerObbyBuilder.server.luau` with distinct friendly
+titles. Reviewed follow-up code used neutral SpawnLocations and one damage loop
+with body-part sets. No Roblox Studio execution was performed. Earlier iterations
+included a 60s timeout and code flaws; these remain evidence that one passing run
+does not establish universal reliability. The existing timeout and refund policy
+is unchanged.
+
 Generation policy: `beginner-build-v3`. Each pass should run the fixture tests,
 then explicitly authorized small live evaluations with `scripts/evaluate-generation.mjs`.
 The live script spends API funds; reports stay in ignored `work/` and never contain keys.

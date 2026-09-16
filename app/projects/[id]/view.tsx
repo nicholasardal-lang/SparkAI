@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "../../auth-form";
 import ProjectActions from "../../project-actions";
 import { readIdea, clearIdea } from "@/lib/spark/draft";
-import { extractFiles, modelFile, scriptFile, scriptModel, normalizeArtifactMarkdown, type SparkFile } from "@/lib/spark/artifacts";
+import { extractFiles, modelFile, scriptFile, scriptModel, normalizeArtifactMarkdown, fileTitle, type SparkFile } from "@/lib/spark/artifacts";
 function downloadFile(name:string, content:string) {
   const url=URL.createObjectURL(new Blob([content],{type:"text/plain;charset=utf-8"}));
   const link=document.createElement("a"); link.href=url; link.download=name; link.click();
@@ -29,7 +29,7 @@ function downloadFile(name:string, content:string) {
 }
 function FileCard({file}:{file:SparkFile}) {
   const name=file.kind==="model"?file.name:file.name.replace(/\.luau$/,".rbxmx");
-  return <section className="code-block"><header style={{flexWrap:"wrap",gap:12}}><strong style={{overflowWrap:"anywhere"}}>{name}</strong><button className="button" onClick={()=>downloadFile(name,file.kind==="model"?file.content:scriptModel(file))}>Download for Roblox</button></header><div style={{padding:"12px 16px"}}><p><strong>Put it in:</strong> {file.location}</p><ol><li>Download the file above.</li><li>In Roblox Studio’s Explorer, right-click {file.kind==="model"?"Workspace":"the location above"} → Insert from File / Import Roblox Model.</li><li>{file.kind==="model"?"Choose the file, then press Play to try the build.":"Choose the file. Review the code, then turn off Disabled in Properties to enable it (ModuleScripts run when required)."}</li></ol>{file.kind==="script"&&<details><summary>View code & source download</summary><button onClick={()=>downloadFile(file.name,file.source)}>Download .luau source</button><Code code={file.source} downloadable={false}/></details>}</div></section>;
+  return <section className="code-block" style={{flexShrink:0}}><header style={{flexWrap:"wrap",gap:12}}><div style={{minWidth:0,flex:"1 1 180px"}}><strong style={{overflowWrap:"anywhere",fontSize:15}}>{fileTitle(file)}</strong><div className="muted" style={{fontSize:11,overflowWrap:"anywhere",marginTop:4}}>{name}</div></div><button className="button" onClick={()=>downloadFile(name,file.kind==="model"?file.content:scriptModel(file))}>Download for Roblox</button></header><div style={{padding:"12px 16px"}}><p><strong>Put it in:</strong> {file.location}</p><ol><li>Download the file above.</li><li>In Roblox Studio’s Explorer, right-click {file.kind==="model"?"Workspace":"the location above"} → Insert from File / Import Roblox Model.</li><li>{file.kind==="model"?"Choose the file, then press Play to try the build.":"Choose the file. Review the code, then turn off Disabled in Properties to enable it (ModuleScripts run when required)."}</li></ol>{file.kind==="script"&&<details><summary>View code & source download</summary><button onClick={()=>downloadFile(file.name,file.source)}>Download .luau source</button><Code code={file.source} downloadable={false}/></details>}</div></section>;
 }
 function ModelCard({source}:{source:string}) {
   try {return <FileCard file={modelFile(source)}/>;} catch {return <p className="error">This model could not be exported. Ask Spark to regenerate a complete model with supported parts.</p>;}
@@ -221,7 +221,8 @@ export default function Workspace({ id }: { id: string }) {
   }
   const files = (data?.messages || [])
     .filter((m: any) => m.role === "assistant")
-    .flatMap((m: any) => extractFiles(m.content));
+    .flatMap((m: any) => extractFiles(m.content).map(file=>({...file,title:fileTitle(file,m.content)})))
+    .reverse();
   return (
     <SidebarProvider>
       <Sidebar>
