@@ -21,6 +21,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "../../auth-form";
 import ProjectActions from "../../project-actions";
 import { readIdea, clearIdea } from "@/lib/spark/draft";
+import { extractFiles, modelFile, scriptFile, scriptModel, type SparkFile } from "@/lib/spark/artifacts";
+function downloadFile(name:string, content:string) {
+  const url=URL.createObjectURL(new Blob([content],{type:"text/plain;charset=utf-8"}));
+  const link=document.createElement("a"); link.href=url; link.download=name; link.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function FileCard({file}:{file:SparkFile}) {
+  return <section className="code-block"><header><strong>{file.name}</strong><button onClick={()=>downloadFile(file.name,file.content)}>Download</button></header><div style={{padding:"12px 16px"}}><p>{file.kind==="model"?"Roblox model · anchored parts":file.scriptType} · {file.location}</p>{file.kind==="model"?<p>In Studio Explorer, right-click Workspace → Insert from File / Import Roblox Model. Select this file, then move and test the model.</p>:<><p>Create the matching script type at the location above and paste the downloaded source. Or import the Studio file below at that location, review it, then enable the script.</p><button onClick={()=>downloadFile(file.name.replace(/\.luau$/,".rbxmx"),scriptModel(file))}>Download Studio file (.rbxmx)</button></>}</div></section>;
+}
+function ModelCard({source}:{source:string}) {
+  try {return <FileCard file={modelFile(source)}/>;} catch {return <p className="error">This model could not be exported. Ask Spark to regenerate a complete model with supported parts.</p>;}
+}
 const prompts = [
   "Help me plan an obby.",
   "Create a checkpoint system.",
@@ -30,15 +42,18 @@ const prompts = [
 function Code({
   code,
   language = "luau",
+  downloadable = true,
 }: {
   code: string;
   language?: string;
+  downloadable?: boolean;
 }) {
   const [status, setStatus] = useState("Copy");
   return (
     <section className="code-block">
       <header>
         <span>{language}</span>
+        {downloadable && ["luau","lua"].includes(language) && <button onClick={()=>{const file=scriptFile(code);downloadFile(file.name,file.content);}}>Download .luau</button>}
         <button
           onClick={async () => {
             try {
@@ -60,6 +75,7 @@ function Code({
   );
 }
 function Markdown({ text }: { text: string }) {
+  const complete=!text.includes("Response reached its length limit")&&!text.includes("This response is incomplete");
   return (
     <div className="markdown">
       <ReactMarkdown
@@ -69,11 +85,13 @@ function Markdown({ text }: { text: string }) {
           pre: ({ children }) => <>{children}</>,
           code: ({ children, className, node, ...props }) => {
             const content = String(children);
+            if(className === "language-spark-model") return complete ? <ModelCard source={content}/> : <p className="notice">The model is incomplete. Ask Spark to regenerate a smaller complete model before downloading.</p>;
             return className?.startsWith("language-") ||
               content.includes("\n") ? (
               <Code
                 language={className?.replace("language-", "") || "code"}
                 code={content.replace(/\n$/, "")}
+                downloadable={complete}
               />
             ) : (
               <code {...props}>{children}</code>
@@ -158,9 +176,10 @@ export default function Workspace({ id }: { id: string }) {
     setError("");
     const request = retrying || { content, requestId: crypto.randomUUID() };
     setRetry(request);
+    if (!retrying) setDraft("");
+    setData((current: any) => current && ({...current, messages: current.messages.some((m: any) => m.id === request.requestId) ? current.messages : [...current.messages, {id: request.requestId, role: "user", content}]}));
     try {
       await api("projects/" + id + "/messages", "POST", {...request,model:quote.model,maxCredits:quote.maxCredits});
-      setDraft((current) => current.trim() === content ? "" : current);
       setRetry(null);
     } catch (e: any) {
       setError(e.message);
@@ -181,8 +200,9 @@ export default function Workspace({ id }: { id: string }) {
       try {
         const latest = await load();
         if (latest.messages.some((m: any) => m.id === request.requestId)) {
-          setDraft((current) => (current.trim() === content ? "" : current));
           if (readIdea()?.projectId === id) clearIdea();
+        } else {
+          setDraft(current => current || content);
         }
       } catch (e: any) {
         setError(e.message);
@@ -191,13 +211,9 @@ export default function Workspace({ id }: { id: string }) {
       sending.current = false;
     }
   }
-  const scripts = (data?.messages || [])
+  const files = (data?.messages || [])
     .filter((m: any) => m.role === "assistant")
-    .flatMap((m: any) =>
-      [...m.content.matchAll(/```(?:luau|lua)?\s*\n([\s\S]*?)```/g)].map(
-        (match: any) => match[1],
-      ),
-    );
+    .flatMap((m: any) => extractFiles(m.content));
   return (
     <SidebarProvider>
       <Sidebar>
@@ -244,7 +260,7 @@ export default function Workspace({ id }: { id: string }) {
             className="flex items-center gap-2 text-sm"
             onClick={() => setScriptsOpen(true)}
           >
-            <Code2 size={17} /> Scripts ({scripts.length})
+            <Code2 size={17} /> Files ({files.length})
           </button>
           <a className="muted" href="/dashboard">
             Dashboard
@@ -403,19 +419,18 @@ export default function Workspace({ id }: { id: string }) {
       </main>
       <Sheet open={scriptsOpen} onOpenChange={setScriptsOpen}>
         <SheetContent className="p-6 overflow-auto sm:max-w-xl">
-          <SheetTitle>Generated scripts</SheetTitle>
+          <SheetTitle>Generated files</SheetTitle>
           <SheetDescription>
             Suggestions from this conversation. Nothing has been installed or
             tested in Roblox Studio.
           </SheetDescription>
-          {scripts.length ? (
-            scripts.map((code: string, i: number) => (
-              <Code code={code} key={i} />
+          {files.length ? (
+            files.map((file: SparkFile, i: number) => (
+              <FileCard file={file} key={i} />
             ))
           ) : (
             <p className="muted">
-              Scripts will appear here when Spark includes Luau code in a
-              response.
+              Ask Spark for a script or a part-based model. Download the generated files here and import them into Roblox Studio manually.
             </p>
           )}
         </SheetContent>

@@ -84,3 +84,10 @@ The core suite uses an isolated SQLite database and a clearly marked mock provid
 - `.openai/hosting.json`: Sites identity and database binding, never secrets
 
 Stack: React, TypeScript, Vinext/Vite, a Cloudflare-compatible Worker, and D1 SQLite. The backend is included in this source, not a separate unimplemented service.
+# Manual Roblox exports and temporary email policy
+
+Email verification is paused by default (`REQUIRE_EMAIL_VERIFICATION=false`). Existing and new accounts can log in without delivery; addresses are not marked verified. Paid access and credit enforcement remain enabled. Re-enable verification explicitly only after email delivery is configured. Password recovery shows an unavailable message when email delivery is not configured.
+
+The chat immediately displays a submitted message and clears the composer, then shows a working state. Saved requests retain retry protection.
+
+Generated Luau blocks can be downloaded as source files or imported as `.rbxmx` Script/LocalScript/ModuleScript objects from the Files panel. Runnable imported scripts start disabled for review. Model replies use validated `spark-model` JSON to create `.rbxmx` models with 1–50 anchored, axis-aligned Block/Ball/Cylinder/Wedge parts. This is part-based construction, not mesh generation or rigging. Invalid or incomplete model responses cannot be downloaded. Files are reconstructed from saved conversations; no automatic Studio installation or execution occurs. Import and game behavior still need manual Studio testing.

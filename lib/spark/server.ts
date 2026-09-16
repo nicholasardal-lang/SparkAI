@@ -10,6 +10,7 @@ export async function pageUser(requireWorkspace = false) {
     ? await userFor(
         `spark_session=${jar.get("spark_session")?.value || ""}`,
         db,
+        (env as unknown as Runtime).REQUIRE_EMAIL_VERIFICATION === "true",
       )
     : null;
   if (!user) redirect("/login");

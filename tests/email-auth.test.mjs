@@ -29,7 +29,7 @@ const DB = {
     } catch (error) { sqlite.exec("ROLLBACK"); throw error; }
   },
 };
-const env = { DB, RESEND_API_KEY: "test-only", EMAIL_FROM: "Spark <test@example.test>", APP_ORIGIN: "https://canonical.test" };
+const env = { DB, REQUIRE_EMAIL_VERIFICATION: "true", RESEND_API_KEY: "test-only", EMAIL_FROM: "Spark <test@example.test>", APP_ORIGIN: "https://canonical.test" };
 const mail = [];
 let failDelivery = false;
 async function fetcher(url, options) {

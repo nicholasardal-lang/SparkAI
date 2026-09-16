@@ -13,7 +13,7 @@ export function selectModel(prompt: string, contextChars = 0, override?: string)
   }
   const complex = /\b(architecture|race condition|deadlock|data loss|data corruption|exploit|anti[- ]?cheat|security audit|multi[- ]?script|cross[- ]server|datastore|data store|inventory system|trading system)\b/i.test(prompt);
   const task = prompt.replace(/\b(?:no|without)\s+(?:code|scripts?|coding)(?:\s+yet)?\b|\b(?:do not|don't)\s+write\s+(?:code|scripts?)(?:\s+yet)?\b/gi, "");
-  const coding = /\b(code|script|luau|debug|fix|implement|refactor|optimi[sz]e)\b/i.test(task) || /```|\bfunction\s*\(/.test(task);
+  const coding = /\b(code|scripts?|models?|luau|debug|fix|implement|refactor|optimi[sz]e)\b/i.test(task) || /```|\bfunction\s*\(/.test(task);
   if (complex || prompt.length > 4000 || (coding && contextChars > 18000))
     return { model: "gpt-6-astra" as const, reason: "Complex systems, extensive code, or difficult debugging" };
   if (coding || prompt.length > 1200 || contextChars > 12000)

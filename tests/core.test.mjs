@@ -43,7 +43,7 @@ const DB = {
     }
   },
 };
-let env = { DB };
+let env = { DB, REQUIRE_EMAIL_VERIFICATION: "true" };
 let calls = 0;
 const fake = async (url, options) => {
   calls++;
@@ -119,6 +119,14 @@ const consent = sqlite.prepare("SELECT legal_version,legal_accepted_at FROM user
 check(consent.legal_version === LEGAL_VERSION && consent.legal_accepted_at > 0, "Acceptance version and timestamp persist");
 const unverifiedWorkspace = await request("projects", "GET", undefined, a.cookie);
 check(unverifiedWorkspace.status === 403 && unverifiedWorkspace.data.code === "EMAIL_NOT_VERIFIED", "Unverified account cannot read workspace API");
+env.REQUIRE_EMAIL_VERIFICATION = "false";
+const noVerifySignup = await request("auth/signup", "POST", {email:"noverify@example.test",username:"noverify_builder",password:"test-password-noverify",acceptedLegal:true,legalVersion:LEGAL_VERSION});
+check(noVerifySignup.status===200 && !noVerifySignup.data.needsVerification && !noVerifySignup.data.verificationSent, "Signup succeeds without sending a verification email while paused");
+check((await request("projects", "GET", undefined, a.cookie)).status === 402, "Paused verification allows existing users through to paid-access checks");
+const noVerifyLogin = await request("auth/login", "POST", {email:"one@example.test",password:"test-password-one"});
+check(noVerifyLogin.status === 200 && !noVerifyLogin.data.needsVerification, "Login does not require email delivery while verification is paused");
+check(sqlite.prepare("SELECT email_verified_at FROM users WHERE id=?").get(a.data.user.id).email_verified_at === null, "Pausing verification does not falsely verify an email");
+env.REQUIRE_EMAIL_VERIFICATION = "true";
 sqlite.prepare("UPDATE users SET email_verified_at=? WHERE email IN (?,?)").run(Date.now(), "one@example.test", "two@example.test");
 check((await request("projects", "POST", { name: "Bypass", workspace_enabled: 1 }, a.cookie)).status === 402, "Client cannot grant itself workspace access");
 env.STRIPE_SECRET_KEY = "sk_test_fixture";
