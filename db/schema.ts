@@ -57,6 +57,14 @@ export const messages = sqliteTable(
   },
   (t) => [index("idx_messages_project_created").on(t.projectId, t.created)],
 );
+export const conversationMemory=sqliteTable('conversation_memory',{
+  projectId:text('project_id').primaryKey().references(()=>projects.id,{onDelete:'cascade'}),
+  summary:text('summary').notNull().default(''),
+  throughId:text('through_id').notNull().default(''),
+  throughCreated:integer('through_created').notNull().default(0),
+  task:text('task').notNull().default('{}'),
+  updated:integer('updated').notNull(),
+});
 export const requests = sqliteTable("requests", {
   id: text("id").primaryKey(),
   userId: text("user_id")

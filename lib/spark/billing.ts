@@ -56,7 +56,7 @@ export async function reserve(db:DB,userId:string,id:string,amount:number){
   db.prepare("UPDATE credit_buckets SET remaining=remaining+COALESCE((SELECT SUM(json_extract(value,'$.amount')) FROM credit_locks,json_each(credit_locks.parts) WHERE credit_locks.user_id=? AND credit_locks.expires<? AND json_extract(value,'$.id')=credit_buckets.id),0) WHERE user_id=?").bind(userId,now,userId),
   db.prepare("DELETE FROM credit_locks WHERE user_id=? AND expires<?").bind(userId,now),
  ]);
- const lock=await db.prepare("INSERT INTO credit_locks (user_id,request_id,expires) VALUES (?,?,?) ON CONFLICT(user_id) DO NOTHING RETURNING user_id").bind(userId,id,now+120000).first();
+ const lock=await db.prepare("INSERT INTO credit_locks (user_id,request_id,expires) VALUES (?,?,?) ON CONFLICT(user_id) DO NOTHING RETURNING user_id").bind(userId,id,now+420000).first();
  if(!lock)throw new Error("Another AI request is still using credits. Please wait.");
  const buckets=(await db.prepare("SELECT * FROM credit_buckets WHERE user_id=? AND remaining>0 AND (expires IS NULL OR expires>?) ORDER BY expires IS NULL,expires,id").bind(userId,Date.now()).all()).results;
  if(buckets.reduce((n:number,b:any)=>n+b.remaining,0)<amount){await db.prepare("DELETE FROM credit_locks WHERE user_id=? AND request_id=?").bind(userId,id).run();throw new Error("Not enough Spark Credits for this request. Add credits or ask for a smaller response.");}

@@ -333,8 +333,47 @@ check(!afterRejectedQuote.data.messages.some(m=>m.content==="Design a secure tra
 check(selectModel("Give me five obby ideas").model==="gpt-5-mini","Short planning routes to mini");
 check(selectModel("Plan a five-stage obby. No code yet.").model==="gpt-5-mini","Asking for no code does not trigger a coding model");
 check(selectModel("Audit this trading system for a race condition").model==="gpt-6-astra","Complex debugging routes to Astra even in a short prompt");
-check(selectModel("x".repeat(4500)).model==="gpt-6-astra","Large requests route to Astra");
+check(selectModel("x".repeat(4500)).model==="gpt-5-mini","Length alone does not force an expensive model");
 check(modelCredits("gpt-6-astra",1000,1000)>modelCredits("gpt-5.6-terra",1000,1000) && modelCredits("gpt-5.6-terra",1000,1000)>modelCredits("gpt-5-mini",1000,1000),"Credits account for the selected model's cost");
+// Real SQLite integration: compaction is quoted, survives reload, and is atomic
+// with the answer/credit settlement. Provider calls are deterministic fixtures.
+const historyStart=Date.now()-1000000;
+for(let i=0;i<18;i++) {
+ const uid=crypto.randomUUID(),stamp=historyStart+i*2;
+ const text=`Decision ${i}: use mobile controls and CoinsStore_v2. `+'Keep the user decisions and names unchanged. '.repeat(150);
+ sqlite.prepare("INSERT INTO requests (id,user_id,project_id,content,state,created,attempts) VALUES (?,?,?,?,'complete',?,1)").run(uid,a.data.user.id,id,text,stamp);
+ sqlite.prepare("INSERT INTO messages (id,project_id,role,content,created) VALUES (?,?,'user',?,?)").run(uid,id,text,stamp);
+ sqlite.prepare("INSERT INTO messages (id,project_id,role,content,created) VALUES (?,?,'assistant',?,?)").run(crypto.randomUUID(),id,'local coins = workspace.Coins\n'.repeat(150),stamp+1);
+}
+const storedCount=sqlite.prepare('SELECT count(*) n FROM messages WHERE project_id=?').get(id).n;
+const creditsBefore=await balance(env,a.data.user.id);
+const memoryBefore=sqlite.prepare('SELECT * FROM conversation_memory WHERE project_id=?').get(id);
+const memoryPrompt='What is a checkpoint?';
+const memoryQuote=await request(`projects/${id}/estimate`,'POST',{content:memoryPrompt},a.cookie);
+check(memoryQuote.status===200,'Long history can be quoted without a summary API call');
+let summaries=0;
+const summaryResponse=(payload)=>{const source=JSON.parse(payload.input[0].content).find(s=>s.role==='user'&&s.content.includes('CoinsStore_v2'));return Response.json({status:'completed',output_text:JSON.stringify({selectedIds:[source.id]}),usage:{input_tokens:1000,output_tokens:100}});};
+const failedMemory=await request(`projects/${id}/messages`,'POST',{content:memoryPrompt,requestId:crypto.randomUUID(),model:memoryQuote.data.model,maxCredits:memoryQuote.data.maxCredits},a.cookie,async(_,opts)=>{
+ const payload=JSON.parse(opts.body);
+ if(payload.instructions.startsWith('Select the IDs')) {summaries++;return summaryResponse(payload);}
+ throw new TypeError('fixture network failure after summary');
+});
+check(summaries>0&&failedMemory.data.code==='NETWORK_ERROR','Long history is summarized before the main response');
+check((await balance(env,a.data.user.id)).credits===creditsBefore.credits,'Failed main response refunds summary and answer reservation');
+check(JSON.stringify(sqlite.prepare('SELECT * FROM conversation_memory WHERE project_id=?').get(id))===JSON.stringify(memoryBefore),'Failed response does not advance durable summary cursor');
+const memorySuccess=await request(`projects/${id}/messages`,'POST',{content:memoryPrompt,requestId:crypto.randomUUID(),model:memoryQuote.data.model,maxCredits:memoryQuote.data.maxCredits},a.cookie,async(_,opts)=>{
+ const payload=JSON.parse(opts.body);
+ if(payload.instructions.startsWith('Select the IDs')) return summaryResponse(payload);
+ assert.ok(payload.input.some(m=>m.content.includes('CoinsStore_v2')));
+ assert.equal(payload.model,memoryQuote.data.model);assert.equal(payload.reasoning.effort,'low');
+ return Response.json({status:'completed',output_text:'Checkpoint explanation with remembered mobile controls.',usage:{input_tokens:1000,output_tokens:100}});
+});
+check(memorySuccess.status===200&&memorySuccess.data.credits<=memoryQuote.data.maxCredits,'Compaction and answer settle within the accepted quote');
+const durable=sqlite.prepare('SELECT * FROM conversation_memory WHERE project_id=?').get(id);
+check(durable.through_id&&durable.summary.includes('CoinsStore_v2'),'Summary and cursor persist after successful completion');
+check(sqlite.prepare('SELECT count(*) n FROM messages WHERE project_id=?').get(id).n===storedCount+3,'Compaction keeps all original messages');
+const reQuote=await request(`projects/${id}/estimate`,'POST',{content:'What is a variable?'},a.cookie);
+check(reQuote.status===200&&reQuote.data.model==='gpt-5-mini','Reloaded summary supports a new economical topic');
 check(
   (await request("projects/" + id, "DELETE", {}, a.cookie)).status === 200,
   "Delete project",
@@ -343,6 +382,7 @@ check(
   sqlite.prepare("SELECT count(*) n FROM messages").get().n === 0,
   "Project deletion cascades to messages",
 );
+check(!sqlite.prepare('SELECT * FROM conversation_memory WHERE project_id=?').get(id),'Project deletion cascades to conversation memory');
 await request("auth/logout", "POST", {}, a.cookie);
 check(
   (await request("projects", "GET", undefined, a.cookie)).status === 401,
@@ -383,7 +423,7 @@ try {
     const payload = JSON.parse(options.body);
     assert.equal(payload.model, "gpt-5-mini");
     assert.equal(payload.reasoning.effort, "low");
-    assert.equal(payload.max_output_tokens, 4096);
+    assert.equal(payload.max_output_tokens, 2048);
     return deadlineSignals.length === 1 ? Response.json({}, { status: 503 }) : Response.json({ output_text: "Recovered" });
   });
   assert.equal(reply, "Recovered");

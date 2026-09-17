@@ -1,5 +1,87 @@
 # AI quality and usage baseline — September 16, 2026
 
+## Phase 1: adaptive-chat-v1 (current)
+
+Scope is the existing chat pipeline. No Game Brain, tools, Studio integration,
+or new project-file system. The earlier sections below are historical baselines.
+
+Inspection found latest-message regex routing, fixed low reasoning, a 30-message /
+30,000-character cutoff, a universal 4,096 output cap and mandatory short beginner
+responses. The implementation plan was to replace these together with one shared
+request plan, token budgeting and lightweight durable notes, then test billing and
+failure behavior before publishing.
+
+| Task | Default model | Reasoning | Output ceiling (including reasoning) | Deadline |
+| --- | --- | --- | --- | --- |
+| Simple explanation/planning | GPT-5 mini | low | 2,048 | 60 seconds |
+| Focused coding/debugging | GPT-5.6 Terra | medium | 8,192 | 120 seconds |
+| Complex systems/security/multi-script debugging | GPT-6 Astra | high | 24,576 | 180 seconds |
+
+Routing replays the answered task context and inherits its complexity for short
+affirmations and dependent edits. Independent conceptual questions reset to the
+economical route. Raw length alone no longer selects Astra. This remains a
+deterministic intent heuristic, not a semantic routing model: ambiguous cases can
+still be misclassified. The owner model override remains supported and does not
+force reasoning low. `AI_MAX_OUTPUT_TOKENS` is an optional owner ceiling, bounded
+at 32,768; no override is currently configured in production.
+
+`creditQuote` produces the exact plan passed to dispatch. Quotes include reasoning
+output and any compaction calls. Actual provider usage settles credits, capped at
+the user's accepted reservation. Cached input retains its existing discount.
+Compaction or main-call failure refunds the entire Spark reservation; OpenAI may
+still bill work performed. A 300-second overall deadline stays inside the
+360-second project lock and 420-second credit lock. No paid retry on ambiguous
+network failures or timeouts.
+
+Context uses local o200k BPE token counts, with protocol/model headroom in quotes;
+actual provider counts remain authoritative. At 24k conversation tokens, oldest
+whole exchanges are compacted toward a 12k recent window. The newest exchange is
+never cut inside source code. An unusually large single exchange can use up to
+64k tokens; otherwise the request fails explicitly instead of silently dropping
+text. At most four compaction batches are allowed in one send. Draft estimates do
+not call OpenAI or mutate notes. Stored notes, their cursor, the completed answer,
+task state and billing settlement commit together. Original messages are retained.
+
+Durable notes are bounded to 2,048 tokens. The summarizer selects IDs of original
+excerpts; the application copies their exact text and original author labels.
+Unknown IDs and over-budget notes are rejected. This prevents invented summary
+facts, but selection is still lossy: omitted source details must be requested,
+not reconstructed as if remembered. Previous note lines are retained verbatim to
+avoid recursive quotation growth. Notes enter the prompt as untrusted user-level
+conversation context and newer explicit corrections take precedence.
+
+Approachable language remains the default; technical depth and complete code now
+follow the task. Removed mandatory one-sentence explanations, four-step limit,
+120-line target and single-script preference for larger work. Existing download
+format supports up to eight scripts, four small models and twelve setup steps;
+these are bounded response artifacts, not a new file system. Existing Roblox
+correctness checks and truthful manual-testing instructions remain.
+
+Validation: `tests/chat-quality.test.mjs` covers routing continuity/topic changes,
+adaptive API payloads, quote identity, whole-turn compaction, multiple summary
+batches and rejected invented notes. The SQLite API suite has 82 passing checks,
+including summary persistence, ownership, failure rollback, credit refunds,
+history retention and deletion cascade. Type checking and artifact/usage suites
+pass. The migration adds only `conversation_memory`; prior migrations are unchanged.
+
+Live smoke checks: simple explanation 2.95s / estimated $0.0007305; medium coding
+6.74s / $0.00857 with a valid download; high reasoning follow-up 28.19s / $0.06478.
+The initial freeform summarizer invented assumptions, and a verbatim-quote variant
+failed validation. Both were replaced before publishing. Final excerpt-ID selection
+passed and preserved the explicit data key, mobile controls and no-trading decision
+without inventing tasks; estimated $0.0002405. These dollar figures derive from
+provider token usage and configured pricing, not invoice reconciliation. Smoke
+tests do not establish general quality or Roblox runtime correctness.
+
+Official API references:
+- https://developers.openai.com/api/docs/guides/reasoning
+- https://developers.openai.com/api/docs/models/gpt-6-astra
+- https://github.com/niieani/gpt-tokenizer
+
+Run the paid smoke only with an authorized key:
+`node --env-file=.env.openai --experimental-strip-types scripts/evaluate-chat-quality.mjs`
+Use `--summary-only` to test only the compacting selector. Reports stay in ignored `work/`.
+
 ## Follow-up pass: beginner-build-v4
 
 Files now carry readable titles, including backward-compatible titles for older
