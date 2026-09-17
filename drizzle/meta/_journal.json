@@ -57,6 +57,13 @@
       "when": 1789609118605,
       "tag": "0007_freezing_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789620000000,
+      "tag": "0008_scene_asset_pipeline",
+      "breakpoints": true
     }
   ]
 }

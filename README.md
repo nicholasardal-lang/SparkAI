@@ -1,6 +1,12 @@
 # Spark
 
-Spark is a working web app for planning Roblox games, generating Luau scripts, and debugging through conversation. It is independent from Roblox, Anthropic, and OpenAI. Roblox Studio integration is coming soon; the app cannot install, test, or publish scripts.
+Spark is a working web app for planning Roblox games, generating Luau scripts, and debugging through conversation. Asset Studio adds a project-owned mesh/model library, tool-using scene plans, and reviewed static Roblox Studio imports. It is independent from Roblox, Anthropic, and OpenAI. Direct Studio control is not connected; the app cannot automatically install, test, or publish games.
+
+## Asset Studio (new in source)
+
+Open **Assets** in a project to register licensed Roblox mesh/model references, save a scene prompt, review its credit estimate, and run the library-aware planner. Completed plans preserve asset-input snapshots and export a reviewed Edit-mode Studio installer with transforms, materials/PBR, sanitization and undo. Missing meshes are explicit export blockers, not primitive substitutes. External mesh generation, automated uploads, rigging and direct Studio control are later phases—not active integrations.
+
+Apply `drizzle/0008_scene_asset_pipeline.sql` with the other migrations before running this source. Read [Asset Studio architecture, setup and limitations](docs/ASSET-STUDIO.md). A GitHub push saves source only; it does not deploy the hosted website.
 
 ## Open the hosted app
 

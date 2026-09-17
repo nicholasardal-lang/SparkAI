@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Code2, ArrowUp, Plus } from "lucide-react";
+import { Code2, ArrowUp, Plus, Layers3, MessageSquare } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -20,6 +20,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "../../auth-form";
 import ProjectActions from "../../project-actions";
+import AssetStudio from "./asset-studio";
+import { shouldUseAssetStudio } from "@/lib/spark/scene-intent";
 import { readIdea, clearIdea } from "@/lib/spark/draft";
 import { extractFiles, modelFile, scriptFile, scriptModel, normalizeArtifactMarkdown, fileTitle, type SparkFile } from "@/lib/spark/artifacts";
 function downloadFile(name:string, content:string) {
@@ -32,7 +34,9 @@ function FileCard({file}:{file:SparkFile}) {
   return <section className="code-block" style={{flexShrink:0}}><header style={{flexWrap:"wrap",gap:12}}><div style={{minWidth:0,flex:"1 1 180px"}}><strong style={{overflowWrap:"anywhere",fontSize:15}}>{fileTitle(file)}</strong><div className="muted" style={{fontSize:11,overflowWrap:"anywhere",marginTop:4}}>{name}</div></div><button className="button" onClick={()=>downloadFile(name,file.kind==="model"?file.content:scriptModel(file))}>Download for Roblox</button></header><div style={{padding:"12px 16px"}}><p><strong>Put it in:</strong> {file.location}</p><ol><li>Download the file above.</li><li>In Roblox Studio’s Explorer, right-click {file.kind==="model"?"Workspace":"the location above"} → Insert from File / Import Roblox Model.</li><li>{file.kind==="model"?"Choose the file, then press Play to try the build.":"Choose the file. Review the code, then turn off Disabled in Properties to enable it (ModuleScripts run when required)."}</li></ol>{file.kind==="script"&&<details><summary>View code & source download</summary><button onClick={()=>downloadFile(file.name,file.source)}>Download .luau source</button><Code code={file.source} downloadable={false}/></details>}</div></section>;
 }
 function ModelCard({source}:{source:string}) {
-  try {return <FileCard file={modelFile(source)}/>;} catch {return <p className="error">This model could not be exported. Ask Spark to regenerate a complete model with supported parts.</p>;}
+  let file: SparkFile;
+  try {file=modelFile(source);} catch {return <p className="error">This model could not be exported. Ask Spark to regenerate a complete model with supported parts.</p>;}
+  return <FileCard file={file}/>;
 }
 const prompts = [
   "Help me plan an obby.",
@@ -122,14 +126,21 @@ export default function Workspace({ id }: { id: string }) {
     [quote, setQuote] = useState<any>(null),
     [quoteError, setQuoteError] = useState(""),
     [scriptsOpen, setScriptsOpen] = useState(false),
+    [assetsOpen, setAssetsOpen] = useState(false),
+    [assetPrompt, setAssetPrompt] = useState(""),
     [retry, setRetry] = useState<any>(null);
   const sending = useRef(false),
     end = useRef<HTMLDivElement>(null);
+  const assetBuild = shouldUseAssetStudio(draft.trim());
+  function openAssetStudio() {
+    setAssetPrompt(assetBuild ? draft.trim() : "");
+    setAssetsOpen(true);
+  }
   useEffect(() => {
     let cancelled=false;
     setQuote(null);
     setQuoteError("");
-    if (!draft.trim()) return;
+    if (!draft.trim() || assetBuild) return;
     const content=draft.trim();
     const timer=setTimeout(() => {
       api("projects/"+id+"/estimate","POST",{content,requestId:retry?.content===content?retry.requestId:undefined}).then(result => {
@@ -137,7 +148,7 @@ export default function Workspace({ id }: { id: string }) {
       }).catch(e => { if(!cancelled) setQuoteError(e.message); });
     },400);
     return () => {cancelled=true;clearTimeout(timer);};
-  },[draft,id,data?.messages?.length,retry?.requestId]);
+  },[draft,id,data?.messages?.length,retry?.requestId,assetBuild]);
   useEffect(() => {
     setTakingLonger(false);
     if (!busy) return;
@@ -167,6 +178,7 @@ export default function Workspace({ id }: { id: string }) {
   async function send() {
     if (sending.current) return;
     const content = draft.trim();
+    if (shouldUseAssetStudio(content)) { openAssetStudio(); return; }
     const retrying = retry?.content===content ? retry : null;
     if (!content) return;
     if (!quote || quote.content!==content) {
@@ -255,7 +267,7 @@ export default function Workspace({ id }: { id: string }) {
           </div>
         </SidebarContent>
         <SidebarFooter className="p-5">
-          <p className="muted">Roblox Studio integration</p>
+          <p className="muted">Live Roblox Studio connection</p>
           <span className="pill" style={{ width: "fit-content" }}>
             Coming soon
           </span>
@@ -265,6 +277,9 @@ export default function Workspace({ id }: { id: string }) {
         <header className="workspace-header">
           <SidebarTrigger />
           <h1>{data?.project.name || "Your project"}</h1>
+          <button className="workspace-mode" data-active={assetsOpen} aria-label={assetsOpen ? "Back to chat" : "Open Asset Studio"} onClick={() => assetsOpen ? setAssetsOpen(false) : openAssetStudio()}>
+            {assetsOpen ? <MessageSquare size={15} /> : <Layers3 size={15} />} {assetsOpen ? "Chat" : "Assets"}
+          </button>
           <button
             className="flex items-center gap-2 text-sm"
             onClick={() => setScriptsOpen(true)}
@@ -275,7 +290,7 @@ export default function Workspace({ id }: { id: string }) {
             Dashboard
           </a>
         </header>
-        <section
+        {assetsOpen ? <AssetStudio key={id} projectId={id} initialPrompt={assetPrompt} /> : <><section
           className="messages"
           aria-label="Conversation"
           aria-live="polite"
@@ -345,12 +360,13 @@ export default function Workspace({ id }: { id: string }) {
 
               </div>
             )}
-            {quote && (
+            {assetBuild && <div className="usage-estimate asset-chat-routing"><div><strong>This build belongs in Asset Studio.</strong><p>Use mesh/model assets and a structured scene plan. Missing assets stay explicit; no blocky substitute or paid run is created.</p></div><button type="button" className="asset-secondary" onClick={openAssetStudio}><Layers3 size={15} /> Plan in Asset Studio</button></div>}
+            {quote && !assetBuild && (
               <div className="usage-estimate" role="status">
                 About {quote.estimatedCredits.toLocaleString()} Spark Credits · Maximum {quote.maxCredits.toLocaleString()}. Only actual usage is charged; unused reserved credits return automatically.
               </div>
             )}
-            {draft.trim() && !quote && <p className="muted" role="status">{quoteError || "Estimating credit usage…"}</p>}
+            {draft.trim() && !quote && !assetBuild && <p className="muted" role="status">{quoteError || "Estimating credit usage…"}</p>}
             <form
               className="composer"
               onSubmit={(e) => {
@@ -384,10 +400,10 @@ export default function Workspace({ id }: { id: string }) {
                 </small>
                 <button
                   className="button"
-                  aria-label="Send message"
-                  disabled={busy || !draft.trim() || !quote || quote.content!==draft.trim()}
+                  aria-label={assetBuild ? "Plan in Asset Studio" : "Send message"}
+                  disabled={busy || !draft.trim() || (!assetBuild && (!quote || quote.content!==draft.trim()))}
                 >
-                  <ArrowUp size={18} />
+                  {assetBuild ? <Layers3 size={18} /> : <ArrowUp size={18} />}
                 </button>
               </div>
             </form>
@@ -396,7 +412,7 @@ export default function Workspace({ id }: { id: string }) {
               publishing.
             </p>
           </div>
-        )}
+        )}</>}
       </main>
       <Sheet open={scriptsOpen} onOpenChange={setScriptsOpen}>
         <SheetContent className="p-6 overflow-auto sm:max-w-xl">

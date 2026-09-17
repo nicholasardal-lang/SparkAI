@@ -4,7 +4,9 @@ import {
   integer,
   index,
   uniqueIndex,
+  check,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
@@ -65,6 +67,27 @@ export const conversationMemory=sqliteTable('conversation_memory',{
   task:text('task').notNull().default('{}'),
   updated:integer('updated').notNull(),
 });
+export const projectAssets = sqliteTable("project_assets", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  specJson: text("spec_json").notNull(),
+  created: integer("created").notNull(),
+}, (t) => [index("idx_project_assets_created").on(t.projectId, t.created)]);
+export const sceneJobs = sqliteTable("scene_jobs", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  prompt: text("prompt").notNull(),
+  status: text("status", { enum: ["queued", "running", "complete", "failed"] }).notNull(),
+  planJson: text("plan_json"),
+  assetsJson: text("assets_json").notNull().default("[]"),
+  error: text("error"),
+  leaseToken: text("lease_token"),
+  created: integer("created").notNull(),
+  updated: integer("updated").notNull(),
+}, (t) => [
+  index("idx_scene_jobs_project_created").on(t.projectId, t.created),
+  check("scene_jobs_status_check", sql`${t.status} IN ('queued','running','complete','failed')`),
+]);
 export const requests = sqliteTable("requests", {
   id: text("id").primaryKey(),
   userId: text("user_id")

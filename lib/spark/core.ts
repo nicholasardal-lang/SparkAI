@@ -6,6 +6,10 @@ import { artifactInstructions } from "./artifacts.ts";
 import { isBuildRequest, buildFormat, beginnerInstructions, renderBuild, GENERATION_VERSION } from "./generation.ts";
 import {tokens,turnTokens,planContext,compactConversation,memoryTurn,SUMMARY_TOKENS,SUMMARY_OUTPUT,SUMMARY_INSTRUCTIONS,summaryCandidates,summaryFormat} from './context.ts';
 import type {TaskState} from './models.ts';
+import { AssetStoreError, listAssets, addAsset, removeAsset, listSceneJobs, getSceneJob, createSceneJob, claimSceneJob, prepareSceneCompletion, failSceneJob, type SceneJob } from './asset-store.ts';
+import { ScenePlannerError, sceneQuote, planScene } from './scene-planner.ts';
+import { sceneInstaller } from './scenes.ts';
+import { shouldUseAssetStudio, assetStudioGuidance } from './scene-intent.ts';
 export type DB = {
   prepare(sql: string): any;
   batch(statements: any[]): Promise<any>;
@@ -145,6 +149,10 @@ function json(data: any, status = 200, extra: Record<string, string> = {}) {
       ...extra,
     },
   });
+}
+function publicSceneJob(job: SceneJob) {
+  // Internal leases and large input snapshots are not needed by the browser.
+  return {id:job.id,prompt:job.prompt,status:job.status,plan:job.plan,error:job.error,created:job.created,updated:job.updated};
 }
 async function body(req: Request) {
   if (Number(req.headers.get("content-length") || 0) > 24000)
@@ -740,8 +748,88 @@ export async function handle(
         .bind(path[1], user.id)
         .first();
       if (!project) fail(404, "NOT_FOUND", "Project not found.");
+      if (path[2] === "assets") {
+        if (!path[3] && method === "GET") return json({assets:await listAssets(db,project.id)});
+        if (!path[3] && method === "POST") return json({asset:await addAsset(db,project.id,await body(req))},201);
+        if (path[3] && !path[4] && method === "DELETE") {
+          await removeAsset(db,project.id,path[3]); return json({ok:true});
+        }
+        fail(404,"NOT_FOUND","Asset operation not found.");
+      }
+      if (path[2] === "scene-jobs") {
+        if (!path[3] && method === "GET") return json({jobs:(await listSceneJobs(db,project.id)).map(publicSceneJob),aiConfigured:!!env.OPENAI_API_KEY});
+        if (!path[3] && method === "POST") {
+          const b=await body(req);
+          return json({job:publicSceneJob(await createSceneJob(db,project.id,{id:b.id,prompt:b.prompt}))},201);
+        }
+        if (!path[3] || path[5]) fail(404,"NOT_FOUND","Scene operation not found.");
+        const job=await getSceneJob(db,project.id,path[3]);
+        if (!path[4] && method === "GET") return json({job:publicSceneJob(job)});
+        if (path[4] === "estimate" && method === "POST") {
+          await body(req);
+          const quote=sceneQuote(env,project,job.prompt);
+          return json({model:quote.model,label:quote.label,maxCredits:quote.maxCredits,estimatedCredits:quote.estimatedCredits});
+        }
+        if (path[4] === "export" && method === "GET") {
+          if(job.status!=="complete"||!job.plan)fail(409,"SCENE_NOT_READY","Finish planning this scene before exporting.");
+          if(job.plan.missingAssets.length)fail(409,"MISSING_ASSETS","Add the missing assets and create a revised scene before exporting.");
+          let source:string;
+          try {source=sceneInstaller(job.plan,job.assets);} catch(e) {fail(422,"INVALID_SCENE",e instanceof Error?e.message:"Scene export failed validation.");}
+          const filename=job.plan.name.replace(/[^a-zA-Z0-9_-]+/g,"-").slice(0,64)||"Spark-Scene";
+          return json({filename:filename+".studio.luau",source:source!});
+        }
+        if (path[4] === "run" && method === "POST") {
+          const b=await body(req);
+          if(job.status==="complete")return json({job:publicSceneJob(job),duplicate:true});
+          const quote=sceneQuote(env,project,job.prompt);
+          if(b.model!==quote.model||!Number.isFinite(b.maxCredits)||b.maxCredits<quote.maxCredits)
+            fail(409,"QUOTE_CHANGED","Review the updated scene credit estimate, then confirm planning.");
+          if(!env.OPENAI_API_KEY)fail(503,"AI_SETUP_REQUIRED","Your prompt is saved. The app owner must configure the server-side OpenAI API key to enable scene planning.");
+          const ip=req.headers.get("cf-connecting-ip")||"local",minute=Math.floor(Date.now()/60000);
+          if(!(await consume(db,`ai-ip:${await hash(ip)}:${minute}`,20))||!(await consume(db,`ai-user:${user.id}:${minute}`,12)))fail(429,"RATE_LIMIT","Too many AI requests. Please wait a minute and try again.");
+          const now=Date.now(),lockUntil=now+360000;
+          const locked=await db.prepare("UPDATE projects SET busy_until=? WHERE id=? AND user_id=? AND busy_until<? RETURNING id")
+            .bind(lockUntil,project.id,user.id,now).first();
+          if(!locked)fail(409,"BUSY","Another request is running in this project. Please wait.");
+          const reservationId=`scene:${job.id}`;
+          let claimed:SceneJob|undefined,parts:Awaited<ReturnType<typeof reserve>>|undefined;
+          try {
+            // Acquire credits before claiming a paid job. The six-minute scene
+            // lease outlives the bounded four-minute planner, never vice versa.
+            try {parts=await reserve(db,user.id,reservationId,quote.maxCredits);}
+            catch(e) {fail(402,"SPARK_CREDITS_REQUIRED",e instanceof Error?e.message:"Add Spark Credits to continue.");}
+            const dailyLimit=Math.min(1000,Math.max(1,Number(env.DAILY_MESSAGE_LIMIT)||30));
+            if(!(await consume(db,`ai:${user.id}:${new Date().toISOString().slice(0,10)}`,dailyLimit)))
+              fail(429,"DAILY_LIMIT","You have reached your daily AI limit. It resets at midnight UTC.");
+            claimed=await claimSceneJob(db,project.id,job.id);
+            if(claimed.status==="complete") {
+              await settle(db,user.id,reservationId,parts!,0);parts=undefined;
+              return json({job:publicSceneJob(claimed),duplicate:true});
+            }
+            const result=await planScene(env,project,claimed.prompt,claimed.assets,fetcher,AbortSignal.timeout(240000));
+            const completion=await prepareSceneCompletion(db,project.id,job.id,result.plan,claimed.leaseToken!);
+            await settle(db,user.id,reservationId,parts!,result.credits,completion.statements);
+            parts=undefined;
+            console.info("spark_scene_completed",{jobId:job.id,model:quote.model,calls:result.calls,credits:result.credits,providerResponseIds:result.providerResponseIds});
+            return json({job:publicSceneJob(await getSceneJob(db,project.id,job.id)),credits:result.credits});
+          } catch(error) {
+            if(parts) {
+              try {await settle(db,user.id,reservationId,parts,0);} catch {console.error("spark_scene_refund_pending",{jobId:job.id});}
+            }
+            if(claimed?.leaseToken) {
+              const safe=error instanceof ApiError||error instanceof ScenePlannerError||error instanceof AssetStoreError?error.message:"Scene planning failed. No automatic retry was made.";
+              try {await failSceneJob(db,project.id,job.id,safe,claimed.leaseToken);} catch {console.warn("spark_scene_lease_lost",{jobId:job.id});}
+            }
+            throw error;
+          } finally {
+            await db.prepare("UPDATE projects SET busy_until=0 WHERE id=? AND busy_until=?").bind(project.id,lockUntil).run();
+          }
+        }
+        fail(404,"NOT_FOUND","Scene operation not found.");
+      }
       if (path[2] === "estimate" && method === "POST") {
         const b=await body(req);
+        if(shouldUseAssetStudio(string(b.content,8000,"Message")))return json({workflow:"assets",model:"gpt-5.6-terra",label:"Asset Studio",maxCredits:0,estimatedCredits:0});
         const prepared=await prepareAI(env,project,string(b.content,8000,"Message"),b.requestId);
         return json({...prepared.selection,label:modelCatalog[prepared.selection!.model].label,maxCredits:prepared.maxCredits,estimatedCredits:prepared.estimatedCredits});
       }
@@ -805,6 +893,7 @@ export async function handle(
       if (path[2] === "messages" && method === "POST") {
         const b = await body(req);
         const content = string(b.content, 8000, "Message");
+        if(shouldUseAssetStudio(content))fail(409,"ASSET_STUDIO_REQUIRED",assetStudioGuidance);
         const ip=req.headers.get("cf-connecting-ip")||"local",minute=Math.floor(Date.now()/60000);
         if(!(await consume(db,`ai-ip:${await hash(ip)}:${minute}`,20))||!(await consume(db,`ai-user:${user.id}:${minute}`,12)))fail(429,"RATE_LIMIT","Too many AI requests. Please wait a minute and try again.");
         const id = string(b.requestId, 80, "Request ID");
@@ -950,7 +1039,7 @@ export async function handle(
   } catch (error) {
     if (String(error instanceof Error ? error.message : error).includes("USERNAME_TAKEN"))
       return json({ error: "That username is already taken.", code: "USERNAME_TAKEN" }, 409);
-    if (error instanceof ApiError)
+    if (error instanceof ApiError || error instanceof AssetStoreError || error instanceof ScenePlannerError)
       return json({ error: error.message, code: error.code }, error.status);
     console.error(
       "Spark request failed",
