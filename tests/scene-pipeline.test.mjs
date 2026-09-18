@@ -153,3 +153,6 @@ assert.equal((await request(base+'/estimate','POST',{content:'Create a detailed 
 assert.equal((await request(base+'/messages','POST',{content:'Create a detailed dog',requestId:crypto.randomUUID()},a.cookie)).data.code,'ASSET_STUDIO_REQUIRED');
 console.log('Scene API ownership, quotes, billing, idempotency, snapshots, missing assets, tool boundaries, repair and routing checks passed.');
 sqlite.close();
+
+for (const prompt of ['Make a chicken','Create a telescope','Build a helicopter','Make a chandelier','Create a pirate ship','Make a dog not out of bricks','Make a palm tree for my game']) assert.equal(shouldUseAssetStudio(prompt),true,prompt);
+for (const prompt of ['Make a detailed obby','Make a platform','Create a UI menu','Make it jump','Create a story','Make a blocky telescope']) assert.equal(shouldUseAssetStudio(prompt),false,prompt);

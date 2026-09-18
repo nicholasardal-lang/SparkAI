@@ -145,6 +145,23 @@ const webhookRequest = () => handle(new Request("https://spark.test/api/stripe/w
 check((await webhookRequest()).status === 200 && sqlite.prepare("SELECT workspace_enabled FROM users WHERE id=?").get(b.data.user.id).workspace_enabled === 1, "Verified Stripe payment unlocks the account");
 await webhookRequest();
 check(sqlite.prepare("SELECT COUNT(*) AS count FROM credit_ledger WHERE user_id=?").get(b.data.user.id).count === 1, "Duplicate Stripe events do not duplicate credits");
+check(new URLSearchParams(stripeBody).get("success_url").includes("{CHECKOUT_SESSION_ID}"), "Checkout return carries its Stripe session reference");
+const paidSession={id:"cs_fixture",status:"complete",payment_status:"paid",mode:"payment",payment_intent:"pi_fixture",client_reference_id:b.data.user.id,metadata:{user_id:b.data.user.id},success_url:"https://spark.test/upgrade?checkout=success",line_items:{data:[{price:{id:"price_1UFeMQA98x23KT8UQdK4S8l2"},quantity:1}]}};
+const sessionFetch=(patch={})=>async()=>Response.json({...paidSession,...patch});
+check((await request("billing/confirm","POST",{sessionId:"cs_fixture"})).status===401,"Payment confirmation requires sign-in");
+check((await request("billing/confirm","POST",{sessionId:"cs_fixture"},a.cookie,sessionFetch())).status===409,"Another user's checkout cannot unlock access");
+check(!(await request("billing/confirm","POST",{sessionId:"cs_fixture"},b.cookie,sessionFetch({payment_status:"unpaid"}))).data.confirmed,"Unpaid Stripe session is not confirmed");
+check(!(await request("billing/confirm","POST",{sessionId:"cs_fixture"},b.cookie,sessionFetch({status:"open"}))).data.confirmed,"Incomplete checkout is not confirmed");
+check((await request("billing/confirm","POST",{sessionId:"cs_fixture"},b.cookie,sessionFetch({success_url:"https://another.test/upgrade"}))).status===409,"Checkout from another site is rejected");
+check((await request("billing/confirm","POST",{sessionId:"cs_fixture"},b.cookie,sessionFetch())).data.confirmed,"Verified paid checkout unlocks without waiting for a webhook");
+await request("billing/confirm","POST",{sessionId:"cs_fixture"},b.cookie,sessionFetch());
+check(sqlite.prepare("SELECT COUNT(*) AS count FROM credit_ledger WHERE user_id=?").get(b.data.user.id).count===1,"Return-page confirmation and webhook grant credits only once");
+check(!(await request("billing/confirm","POST",{},b.cookie,()=>{throw Error("Must not list sessions on hosted sites")})).data.confirmed,"Hosted confirmation without session never scans Stripe customers");
+const subOwner=noVerifySignup.data.user.id;
+const subscriptionFetch=async url=>Response.json(url.includes("checkout/sessions/")?{...paidSession,mode:"subscription",subscription:"sub_confirm",client_reference_id:subOwner,metadata:{user_id:subOwner}}:{id:"sub_confirm",customer:"cus_confirm",metadata:{user_id:subOwner},status:"active",latest_invoice:{status:"paid"},items:{data:[{price:{id:"price_1UFeGEA98x23KT8UKb0v9mj9"},current_period_start:Math.floor(Date.now()/1000)-60,current_period_end:Math.floor(Date.now()/1000)+86400*30}]}});
+check((await request("billing/confirm","POST",{sessionId:"cs_fixture"},noVerifySignup.cookie,subscriptionFetch)).data.confirmed,"Subscription confirmation verifies paid invoice and period with Stripe");
+await request("billing/confirm","POST",{sessionId:"cs_fixture"},noVerifySignup.cookie,subscriptionFetch);
+check((await balance(env,subOwner,subscriptionFetch)).credits===1200,"Repeated subscription confirmation grants one monthly allowance");
 // Only this isolated test database provisions access for the existing workspace suite.
 sqlite.prepare("UPDATE users SET workspace_enabled=1").run();
 sqlite.prepare("INSERT INTO credit_buckets(id,user_id,remaining,source) VALUES ('fixture',?,1000,'pack')").run(a.data.user.id);
@@ -179,6 +196,19 @@ const created = await request(
 );
 const id = created.data.id;
 check(created.status === 201, "Create project");
+const optionRequest={content:'Make a dog',requestId:crypto.randomUUID()};
+const optionsFetcher=async url=>Response.json(url.includes('thumbnails')?{data:[]}:{creatorStoreAssets:Array.from({length:8},(_,i)=>({asset:{id:123+i,name:'Model '+i,assetTypeId:10,scriptCount:0},creatorStoreProduct:{purchasable:true,purchasePrice:{quantity:{significand:0}}}}))});
+check((await request(`projects/${id}/model-options`,'POST',optionRequest,a.cookie,optionsFetcher)).status===200,'Model request returns saved chat options without an AI call');
+check(JSON.parse(sqlite.prepare('SELECT content FROM messages WHERE id=?').get(optionRequest.requestId+':models').content.split('\n').slice(1).join('\n')).models.length===6,'Model suggestions include six options when available');
+check((await request(`projects/${id}/model-options`,'POST',optionRequest,a.cookie,()=>{throw Error('Duplicate must not search')})).status===200,'Retrying model request does not duplicate the conversation');
+check((await request(`projects/${id}/model-options`,'PATCH',{messageId:optionRequest.requestId+':models',assetId:'999'},a.cookie)).status===400,'Model selection rejects an asset not offered');
+check((await request(`projects/${id}/model-options`,'PATCH',{messageId:optionRequest.requestId+':models',assetId:'123'},b.cookie)).status===404,'Model selection enforces project ownership');
+check((await request(`projects/${id}/model-options`,'PATCH',{messageId:optionRequest.requestId+':models',assetId:'123'},a.cookie)).status===200,'User can choose a suggested model');
+check(sqlite.prepare('SELECT content FROM messages WHERE id=?').get(optionRequest.requestId+':models').content.includes('"selectedId":"123"'),'Model selection persists on reload');
+sqlite.prepare('DELETE FROM messages WHERE project_id=?').run(id);
+check((await request(`projects/${id}/creator-store?q=dog`,"GET",undefined,b.cookie)).status===404,"Creator Store search enforces project ownership");
+check((await request(`projects/${id}/creator-store?q=`,"GET",undefined,a.cookie)).status===400,"Creator Store search rejects empty queries");
+check((await request(`projects/${id}/creator-store?q=dog`,"GET",undefined,a.cookie,async()=>Response.json({creatorStoreAssets:[]}))).status===200,"Signed-in project owner can search without AI configuration");
 for (const [method, suffix, payload] of [
   ["GET", "", null],
   ["PATCH", "", { name: "hacked" }],

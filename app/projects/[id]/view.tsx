@@ -21,6 +21,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "../../auth-form";
 import ProjectActions from "../../project-actions";
 import AssetStudio from "./asset-studio";
+import ModelChoices from "./model-options";
+import {readModelOptions} from "@/lib/spark/model-options";
 import { shouldUseAssetStudio } from "@/lib/spark/scene-intent";
 import { readIdea, clearIdea } from "@/lib/spark/draft";
 import { extractFiles, modelFile, scriptFile, scriptModel, normalizeArtifactMarkdown, fileTitle, type SparkFile } from "@/lib/spark/artifacts";
@@ -178,10 +180,10 @@ export default function Workspace({ id }: { id: string }) {
   async function send() {
     if (sending.current) return;
     const content = draft.trim();
-    if (shouldUseAssetStudio(content)) { openAssetStudio(); return; }
+    const findingModels=shouldUseAssetStudio(content);
     const retrying = retry?.content===content ? retry : null;
     if (!content) return;
-    if (!quote || quote.content!==content) {
+    if (!findingModels && (!quote || quote.content!==content)) {
       try {
         const result=await api("projects/"+id+"/estimate","POST",{content,requestId:retrying?.requestId});
         setQuote({...result,content});
@@ -198,7 +200,8 @@ export default function Workspace({ id }: { id: string }) {
     setDraft("");
     setData((current: any) => current && ({...current, messages: current.messages.some((m: any) => m.id === request.requestId) ? current.messages : [...current.messages, {id: request.requestId, role: "user", content}]}));
     try {
-      await api("projects/" + id + "/messages", "POST", {...request,model:quote.model,maxCredits:quote.maxCredits});
+      if(findingModels) await api("projects/"+id+"/model-options","POST",request);
+      else await api("projects/" + id + "/messages", "POST", {...request,model:quote.model,maxCredits:quote.maxCredits});
       setRetry(null);
     } catch (e: any) {
       setError(e.message);
@@ -332,7 +335,7 @@ export default function Workspace({ id }: { id: string }) {
                 {m.role === "assistant" ? (
                   <>
                     <b>✦ Spark</b>
-                    <Markdown text={m.content} />
+                    {readModelOptions(m.content) ? <ModelChoices options={readModelOptions(m.content)!} projectId={id} messageId={m.id}/> : <Markdown text={m.content} />}
                   </>
                 ) : (
                   <>{m.content}{!busy && data.requests?.some((r:any)=>r.id===m.id) && <div className="notice" style={{marginTop:12}}><span>Spark hasn’t completed this reply.</span>{" "}<button onClick={()=>editFailed({content:m.content,requestId:m.id})}>Edit and send again</button></div>}</>
@@ -360,7 +363,7 @@ export default function Workspace({ id }: { id: string }) {
 
               </div>
             )}
-            {assetBuild && <div className="usage-estimate asset-chat-routing"><div><strong>This build belongs in Asset Studio.</strong><p>Use mesh/model assets and a structured scene plan. Missing assets stay explicit; no blocky substitute or paid run is created.</p></div><button type="button" className="asset-secondary" onClick={openAssetStudio}><Layers3 size={15} /> Plan in Asset Studio</button></div>}
+            {assetBuild && <div className="usage-estimate" role="status">Spark will suggest a few free Roblox models here · 0 Spark Credits</div>}
             {quote && !assetBuild && (
               <div className="usage-estimate" role="status">
                 About {quote.estimatedCredits.toLocaleString()} Spark Credits · Maximum {quote.maxCredits.toLocaleString()}. Only actual usage is charged; unused reserved credits return automatically.
@@ -400,10 +403,10 @@ export default function Workspace({ id }: { id: string }) {
                 </small>
                 <button
                   className="button"
-                  aria-label={assetBuild ? "Plan in Asset Studio" : "Send message"}
+                  aria-label="Send message"
                   disabled={busy || !draft.trim() || (!assetBuild && (!quote || quote.content!==draft.trim()))}
                 >
-                  {assetBuild ? <Layers3 size={18} /> : <ArrowUp size={18} />}
+                  <ArrowUp size={18} />
                 </button>
               </div>
             </form>

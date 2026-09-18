@@ -1,14 +1,20 @@
 // Keep script/gameplay requests in chat. A high-fidelity visual asset needs the
 // library/scene workflow, not the legacy primitive JSON exporter.
 export function shouldUseAssetStudio(prompt: string) {
-  if (/\b(?:blocky|primitive|bricks?|voxel|graybox|greybox|blockout)\b/i.test(prompt)) return false;
+  const shapePreference = prompt.replace(/\b(?:not|without|no)\s+(?:(?:made|built)\s+)?(?:(?:out\s+)?of\s+)?(?:bricks?|blocks?|primitives?)\b/gi, '');
+  if (/\b(?:blocky|primitive|bricks?|voxel|graybox|greybox|blockout)\b/i.test(shapePreference)) return false;
   if (/\b(?:script|luau|debug|fix|code|controller|system)\b/i.test(prompt)) return false;
   if (/\b(?:do not|don't)\s+(?:build|create|generate|implement)\b|\b(?:research|compare|explain)\b/i.test(prompt)) return false;
   const create = /\b(?:build|create|generate|make|model|assemble|design)\b/i.test(prompt);
-  const organic = /\b(?:dogs?|cats?|animals?|horses?|dragons?|creatures?|sports? cars?|vehicles?|cars?|trucks?|motorcycles?)\b/i.test(prompt);
-  const detailed = /\b(?:detailed|polished|realistic|medieval|weathered|mesh(?:parts?)?|pbr|textured|furnished|organic|blacksmith|high[- ](?:quality|fidelity))\b/i.test(prompt);
-  const object = /\b(?:shops?|buildings?|houses?|castles?|environments?|forests?|cities|city|villages?|interiors?|props?|models?|scenes?|assets?|trees?|rocks?|forges?|blacksmith)\b/i.test(prompt);
-  return create && (organic || (detailed && object));
+  // Default physical-object requests to model choices rather than maintaining
+  // a small animal allowlist. Keep abstract work and gameplay generation in chat.
+  if (/\b(?:function|datastore|algorithm|tutorial|instructions|plan|story|idea|image|thumbnail|picture|logo|ui|gui|menu|hud|leaderboard|inventory|checkpoint|respawn|combat|currency|saving|animation)\b/i.test(prompt)) return false;
+  const subject = prompt.replace(/\b(?:for|in) (?:my |the )?(?:roblox )?game\b/gi, '');
+  if (/\b(?:obby|game)\b/i.test(subject)) return false;
+  const detailed = /\b(?:detailed|realistic|mesh|furnished|ornate)\b/i.test(subject);
+  if (/\b(?:obby|game|button|platform|floor|wall|ramp|stairs|cube|block|sphere)\b/i.test(subject) && !detailed) return false;
+  if (/\b(?:it|that|this)\s+(?:work|faster|slower|better|jump|move|follow|spin|change)\b/i.test(subject)) return false;
+  return create;
 }
 
-export const assetStudioGuidance = "This visual build belongs in Asset Studio. Open **Assets** above the chat, add mesh/model references you have permission to use, then save this prompt and review the planning estimate. Spark will search your library and assemble a scene plan with transforms and materials. Missing meshes are listed as assets to source—not replaced with primitive approximations. External mesh generation and direct Studio control are not connected yet.";
+export const assetStudioGuidance = "This visual build belongs in Asset Studio. Open **Assets** above the chat and use **Find free Roblox models** to search the Creator Store—no personal library is needed. Choose a model for Studio import instructions. For scene planning, add its reference and measured dimensions to your library, then save this prompt and review the planning estimate. Spark will search your library and assemble a scene plan with transforms and materials. Missing meshes are listed as assets to source—not replaced with primitive approximations. External mesh generation and direct Studio control are not connected yet.";

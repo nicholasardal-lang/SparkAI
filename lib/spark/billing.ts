@@ -1,5 +1,28 @@
 import type {DB,Runtime} from "./core.ts";
-import {plans,stripePrices} from "./plans.ts";
+import {plans,creditPacks,stripePrices} from "./plans.ts";
+// The browser's success URL is only a hint. Verify ownership and payment with
+// Stripe before provisioning. Pack IDs match webhook fulfillment for deduplication.
+export async function confirmCheckout(env:Runtime,userId:string,sessionId:string,origin:string,fetcher:typeof fetch=fetch){
+ const session=await stripe(env,`checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=line_items`,fetcher);
+ if(session.metadata?.user_id!==userId||session.client_reference_id!==userId)throw new Error("Checkout does not belong to this account");
+ if(new URL(session.success_url).origin!==origin)throw new Error("Checkout belongs to a different site");
+ if(session.status!=="complete"||session.payment_status!=="paid")return false;
+ if(session.mode==="subscription"&&typeof session.subscription==="string"){
+  await syncSubscription(env,userId,session.subscription,fetcher);
+ }else if(session.mode==="payment"&&typeof session.payment_intent==="string"){
+  const items=session.line_items?.data;
+  const pack=creditPacks.find(p=>stripePrices.packs[p.name]===items?.[0]?.price?.id);
+  if(!pack||items.length!==1||items[0].quantity!==1)throw new Error("Unrecognized credit purchase");
+  await env.DB.batch([
+   env.DB.prepare("INSERT INTO credit_buckets (id,user_id,remaining,expires,source) VALUES (?,?,?,NULL,'pack') ON CONFLICT(id) DO NOTHING").bind(`pack:${session.payment_intent}`,userId,pack.credits),
+   env.DB.prepare("INSERT INTO credit_ledger (id,user_id,amount,source,stripe_reference,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(stripe_reference) DO NOTHING").bind(crypto.randomUUID(),userId,pack.credits,"credit_pack",session.payment_intent,Date.now()),
+  ]);
+ }else throw new Error("Unsupported checkout");
+ const access=await balance(env,userId,fetcher);
+ const enabled=access.active||access.credits>0;
+ await env.DB.prepare("UPDATE users SET workspace_enabled=? WHERE id=?").bind(enabled?1:0,userId).run();
+ return enabled;
+}
 export async function stripe(env:Runtime,path:string,fetcher:typeof fetch=fetch,params?:URLSearchParams){
  if(!env.STRIPE_SECRET_KEY)throw new Error("Stripe is not configured");
  const r=await fetcher("https://api.stripe.com/v1/"+path,{method:params?"POST":"GET",headers:{Authorization:`Bearer ${env.STRIPE_SECRET_KEY}`,"Content-Type":"application/x-www-form-urlencoded"},...(params?{body:params.toString()}:{}),signal:AbortSignal.timeout(10000)});

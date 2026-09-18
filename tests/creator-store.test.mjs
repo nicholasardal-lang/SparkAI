@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import {freeModels,searchCreatorStore} from '../lib/spark/creator-store.ts';
+const model={asset:{id:123,name:'Dog',assetTypeId:10,scriptCount:0},creator:{name:'Maker',verified:true},creatorStoreProduct:{purchasable:true,purchasePrice:{quantity:{significand:0,exponent:0}}}};
+const paid={...model,asset:{...model.asset,id:124},creatorStoreProduct:{...model.creatorStoreProduct,purchasePrice:{quantity:{significand:500,exponent:-2}}}};
+assert.equal(freeModels({creatorStoreAssets:[model,model,paid,{...model,creatorStoreProduct:{purchasable:true}},{...model,asset:{...model.asset,assetTypeId:13}},{...model,creatorStoreProduct:{...model.creatorStoreProduct,purchasable:false}}]}).length,1);
+let calls=0;
+const result=await searchCreatorStore('dog','next',async(url,options)=>{
+ calls++;
+ assert.ok(!options.headers?.Authorization&&!options.headers?.Cookie);
+ if(url.includes('thumbnails'))return Response.json({data:[{targetId:123,state:'Completed',imageUrl:'https://tr.rbxcdn.com/dog.png'}]});
+ const b=JSON.parse(options.body);assert.equal(b.maxPriceCents,0);assert.equal(b.searchCategoryType,'Model');assert.equal(b.pageToken,'next');
+ if(calls===1)return new Response('',{status:403,headers:{'x-csrf-token':'fixture'}});
+ assert.equal(options.headers['x-csrf-token'],'fixture');return Response.json({creatorStoreAssets:[model],nextPageToken:'next2'});
+});
+assert.equal(calls,3);assert.equal(result.models[0].thumbnail,'https://tr.rbxcdn.com/dog.png');assert.equal(result.nextPageToken,'next2');
+const noImage=await searchCreatorStore('dog','',async url=>url.includes('thumbnails')?Response.json({data:[{targetId:123,state:'Completed',imageUrl:'https://evil.example/model.png'}]}):Response.json({creatorStoreAssets:[model]}));
+assert.equal(noImage.models[0].thumbnail,null);
+await assert.rejects(()=>searchCreatorStore('','',()=>{throw Error('Should not fetch')}));
+await assert.rejects(()=>searchCreatorStore('dog','',async()=>new Response('',{status:429})));
+assert.throws(()=>freeModels({}));
+console.log('Creator Store: free-only filtering, deduplication, anonymous CSRF, pagination, thumbnail allowlist, validation and errors passed.');

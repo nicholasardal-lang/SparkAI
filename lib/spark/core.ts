@@ -1,6 +1,7 @@
+import {downloadModel} from './model-download.ts';
 import { LEGAL_VERSION } from "./legal.ts";
 import { plans, creditPacks, stripePrices } from "./plans.ts";
-import { balance, reserve, settle, stripe, syncSubscription } from "./billing.ts";
+import { balance, reserve, settle, stripe, syncSubscription, confirmCheckout } from "./billing.ts";
 import { modelCatalog, modelCredits, selectModel, usageMetrics } from "./models.ts";
 import { artifactInstructions } from "./artifacts.ts";
 import { isBuildRequest, buildFormat, beginnerInstructions, renderBuild, GENERATION_VERSION } from "./generation.ts";
@@ -10,6 +11,8 @@ import { AssetStoreError, listAssets, addAsset, removeAsset, listSceneJobs, getS
 import { ScenePlannerError, sceneQuote, planScene } from './scene-planner.ts';
 import { sceneInstaller } from './scenes.ts';
 import { shouldUseAssetStudio, assetStudioGuidance } from './scene-intent.ts';
+import { searchCreatorStore } from './creator-store.ts';
+import {MODEL_OPTIONS_PREFIX,readModelOptions,modelSearchTerms} from './model-options.ts';
 export type DB = {
   prepare(sql: string): any;
   batch(statements: any[]): Promise<any>;
@@ -18,6 +21,7 @@ export type Runtime = {
   DB: DB;
   BUCKET?: R2Bucket;
   OPENAI_API_KEY?: string;
+  ROBLOX_API_KEY?: string;
   OPENAI_MODEL?: string;
   DAILY_MESSAGE_LIMIT?: string;
   AI_MAX_OUTPUT_TOKENS?: string;
@@ -670,6 +674,21 @@ export async function handle(
       const session=await stripe(env,"billing_portal/sessions",fetcher,new URLSearchParams({customer:account.stripe_customer_id,return_url:`${url.origin}/account?tab=billing`}));
       return json({url:session.url});
     }
+    if (path[0] === "billing" && path[1] === "confirm" && method === "POST") {
+      const b=await body(req);
+      let sessionId=b.sessionId;
+      if(!(await consume(db,`checkout-confirm:${user.id}:${Math.floor(Date.now()/60000)}`,20)))fail(429,"CONFIRM_LIMIT","Please wait a minute before checking again.");
+      // Recover older local sandbox redirects which did not include a session ID.
+      // Never search all customer sessions on the hosted site or with live keys.
+      if(!sessionId&&["localhost","127.0.0.1"].includes(url.hostname)&&env.STRIPE_SECRET_KEY?.startsWith("sk_test_")){
+        const recent=await stripe(env,`checkout/sessions?limit=100&created[gte]=${Math.floor(Date.now()/1000)-86400}`,fetcher);
+        sessionId=recent.data?.find((s:any)=>!s.livemode&&s.metadata?.user_id===user.id&&s.client_reference_id===user.id&&s.status==="complete"&&s.payment_status==="paid"&&s.success_url?.startsWith(`${url.origin}/`))?.id;
+      }
+      if(!sessionId)return json({confirmed:false});
+      if(typeof sessionId!=="string"||!/^cs_[a-zA-Z0-9_]{1,250}$/.test(sessionId))fail(400,"INVALID_CHECKOUT","Invalid checkout reference.");
+      try{return json({confirmed:await confirmCheckout(env,user.id,sessionId,url.origin,fetcher)});}
+      catch{fail(409,"CHECKOUT_UNCONFIRMED","We couldn't verify this payment yet. Please check again shortly; you don't need to pay again.");}
+    }
     if (path[0] === "billing" && path[1] === "checkout" && method === "POST") {
       if(user.email_verification_required===1&&!user.email_verified_at)fail(403,"EMAIL_NOT_VERIFIED","Verify your email before starting checkout.");
       const b = await body(req);
@@ -677,7 +696,7 @@ export async function handle(
         "line_items[0][quantity]": "1",
         customer_email: user.email,
         client_reference_id: user.id,
-        success_url: `${url.origin}/upgrade?checkout=success`,
+        success_url: `${url.origin}/upgrade?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${url.origin}/upgrade?checkout=cancelled`,
         "metadata[user_id]": user.id,
       });
@@ -748,6 +767,58 @@ export async function handle(
         .bind(path[1], user.id)
         .first();
       if (!project) fail(404, "NOT_FOUND", "Project not found.");
+      if(path[2]==="model-download"&&!path[3]&&method==="POST"){
+        const b=await body(req);
+        const message=await db.prepare("SELECT content FROM messages WHERE id=? AND project_id=? AND role='assistant'").bind(string(b.messageId,100,"Message ID"),project.id).first();
+        const options=message?readModelOptions(message.content):null;
+        const model=options?.models.find(m=>m.id===b.assetId&&m.id===options.selectedId);
+        if(!model)fail(400,"INVALID_ASSET_INPUT","Choose a model from this conversation first.");
+        if(!(await consume(db,`model-download:${user.id}:${Math.floor(Date.now()/60000)}`,10)))fail(429,"DOWNLOAD_LIMIT","Please wait a minute before downloading again.");
+        try{
+          const file=await downloadModel(model.id,env.ROBLOX_API_KEY||"",fetcher);
+          const name=model.name.replace(/[^a-zA-Z0-9_-]+/g,"-").slice(0,70)||"Spark-model";
+          return new Response(file.bytes,{headers:{"Content-Type":"application/octet-stream","Content-Disposition":`attachment; filename="${name}.${file.extension}"`,"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
+        }catch(e){fail(503,"MODEL_DOWNLOAD_UNAVAILABLE",e instanceof Error?e.message:"Model download unavailable.");}
+      }
+      if(path[2]==="model-options"&&method==="POST"){
+        const b=await body(req),content=string(b.content,8000,"Message"),requestId=string(b.requestId,80,"Request ID");
+        if(!/^[a-zA-Z0-9-]{16,80}$/.test(requestId))fail(400,"INVALID_INPUT","Invalid request reference.");
+        const existing=await db.prepare("SELECT project_id,content FROM messages WHERE id=?").bind(requestId).first();
+        if(existing){if(existing.project_id!==project.id||existing.content!==content)fail(409,"DUPLICATE","Request reference already used.");return json({ok:true});}
+        if(!(await consume(db,`store-search:${user.id}:${Math.floor(Date.now()/60000)}`,20)))fail(429,"SEARCH_LIMIT","Please wait a minute before trying again.");
+        const until=Date.now()+20000;
+        const lock=await db.prepare("UPDATE projects SET busy_until=? WHERE id=? AND busy_until<? RETURNING id").bind(until,project.id,Date.now()).first();
+        if(!lock)fail(409,"BUSY","Spark is still working on your previous request.");
+        try{
+          const query=modelSearchTerms(content);
+          const result=await searchCreatorStore(query,"",fetcher);
+          const reply=MODEL_OPTIONS_PREFIX+JSON.stringify({query,models:result.models.slice(0,6)});
+          const now=Date.now();
+          await db.batch([
+            db.prepare("INSERT INTO messages(id,project_id,role,content,created) VALUES (?,?,'user',?,?)").bind(requestId,project.id,content,now),
+            db.prepare("INSERT INTO messages(id,project_id,role,content,created) VALUES (?,?,'assistant',?,?)").bind(requestId+':models',project.id,reply,now+1),
+            db.prepare("UPDATE projects SET updated=? WHERE id=?").bind(now,project.id),
+          ]);
+          return json({ok:true});
+        }catch{fail(503,"STORE_UNAVAILABLE","Spark couldn't find model options right now. Please send your request again shortly. No credits were charged.");}
+        finally{await db.prepare("UPDATE projects SET busy_until=0 WHERE id=? AND busy_until=?").bind(project.id,until).run();}
+      }
+      if(path[2]==="model-options"&&method==="PATCH"){
+        const b=await body(req);
+        const message=await db.prepare("SELECT content FROM messages WHERE id=? AND project_id=? AND role='assistant'").bind(string(b.messageId,100,"Message ID"),project.id).first();
+        const options=message?readModelOptions(message.content):null;
+        if(!options||!options.models.some(m=>m.id===b.assetId))fail(400,"INVALID_ASSET_INPUT","Choose one of the offered models.");
+        await db.prepare("UPDATE messages SET content=? WHERE id=? AND project_id=?").bind(MODEL_OPTIONS_PREFIX+JSON.stringify({...options,selectedId:b.assetId}),b.messageId,project.id).run();
+        return json({ok:true});
+      }
+      if(path[2]==="creator-store"&&!path[3]&&method==="GET"){
+        const query=string(url.searchParams.get("q"),120,"Search",1);
+        const pageToken=url.searchParams.get("cursor")||"";
+        if(pageToken.length>1024)fail(400,"INVALID_INPUT","Invalid search page.");
+        if(!(await consume(db,`store-search:${user.id}:${Math.floor(Date.now()/60000)}`,20)))fail(429,"SEARCH_LIMIT","Please wait a minute before searching again.");
+        try{return json(await searchCreatorStore(query,pageToken,fetcher));}
+        catch{fail(503,"STORE_UNAVAILABLE","Roblox search is temporarily unavailable. Try again shortly or open the Creator Store directly.");}
+      }
       if (path[2] === "assets") {
         if (!path[3] && method === "GET") return json({assets:await listAssets(db,project.id)});
         if (!path[3] && method === "POST") return json({asset:await addAsset(db,project.id,await body(req))},201);

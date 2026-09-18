@@ -13,14 +13,19 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [confirmingPayment, setConfirmingPayment] = useState(false);
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("checkout") !== "success") return;
+    const query=new URLSearchParams(window.location.search);
+    if (query.get("checkout") !== "success") return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempts = 0;
     setConfirmingPayment(true);
     const checkAccess = async () => {
       try {
+        const confirmation=await api("billing/confirm", "POST", {sessionId:query.get("session_id")});
+        if(cancelled)return;
+        if(confirmation.confirmed){window.location.replace("/dashboard");return;}
         const result = await api("me");
+        if(cancelled)return;
         if (result.user?.workspace_enabled === 1) {
           window.location.replace("/dashboard");
           return;
@@ -32,7 +37,7 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
       if (!cancelled && attempts < 15) timer = setTimeout(checkAccess, 1000);
       else if (!cancelled) {
         setConfirmingPayment(false);
-        setError("Your payment succeeded, but Spark is still confirming it. Refresh this page in a moment.");
+        setError("Spark couldn't confirm your payment yet. Refresh to check again. If Stripe shows it as paid, don't pay again.");
       }
     };
     void checkAccess();
@@ -40,7 +45,7 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
   }, []);
   return <main className="plans-page">
     <nav className="plans-nav"><a className="brand" href="/"><span className="logo-mark" aria-hidden="true">✦</span><span>Spark</span></a>{signedIn ? <button onClick={async () => { try { await api("auth/logout", "POST", {}); location.assign("/"); } catch { setError("Could not log out. Please try again."); } }}>Log out</button> : <a href="/login">Log in</a>}</nav>
-    {confirmingPayment && <p className="notice" role="status">Payment confirmed. Unlocking your Spark workspace…</p>}
+    {confirmingPayment && <p className="notice" role="status">Checking your payment and unlocking your Spark workspace…</p>}
     <header className="plans-heading"><span className="pill">YOUR NEXT CHAPTER</span><h1>Give your ideas room to <span>grow.</span></h1><p>{signedIn ? "Your account is ready. Choose a plan or add credits to unlock Spark." : "Choose the right amount of Spark for the way you build."}</p></header>
     <div className="billing-toggle" role="group" aria-label="Billing frequency"><button aria-pressed={!yearly} onClick={() => setYearly(false)}>Monthly</button><button aria-pressed={yearly} onClick={() => setYearly(true)}>Yearly <span>Save 16.7%</span></button></div>
     <div className="plans-grid">{plans.map(plan => <article key={plan.id} className={"pricing-card " + (plan.id === "creator" ? "recommended" : "")}>
