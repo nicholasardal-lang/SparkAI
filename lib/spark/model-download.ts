@@ -9,7 +9,9 @@ export async function downloadModel(id:string,key:string,fetcher:typeof fetch=fe
  const data:any=await response.json();
  const location=data.location||data.locations?.[0]?.location;
  const url=new URL(location);
- if(url.protocol!=='https:'||!url.hostname.endsWith('.rbxcdn.com')||url.username||url.password||url.port)throw Error('Roblox returned an unsupported download location.');
+ // Roblox delivers assets through both its legacy CDN and its newer byte endpoint.
+ const trustedHost=url.hostname.endsWith('.rbxcdn.com')||url.hostname==='contentdelivery.roblox.com';
+ if(url.protocol!=='https:'||!trustedHost||url.username||url.password||url.port)throw Error('Roblox returned an unsupported download location.');
  const file=await fetcher(url.href,{signal,redirect:'manual'});
  if(!file.ok||!file.body)throw Error('The model file is unavailable.');
  const limit=20*1024*1024;
