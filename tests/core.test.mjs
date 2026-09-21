@@ -424,8 +424,9 @@ await assert.rejects(() => callOpenAI({ OPENAI_API_KEY: "fixture" }, [], {}, asy
   return Response.json({ error: { type: "insufficient_quota", message: "Quota exceeded" } }, { status: 429 });
 }), (error) => error.code === "NO_CREDITS");
 check(quotaCalls === 1, "Credit exhaustion is not retried");
-const partial = await callOpenAI({ OPENAI_API_KEY: "fixture" }, [], {}, async () => Response.json({ status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [{ content: [{ type: "output_text", text: "```luau\nlocal x = 1" }] }] }));
-check(partial.includes("\n```\n\n*Response reached"), "Truncated code is closed and labelled incomplete");
+let partialCharged = false;
+await assert.rejects(() => callOpenAI({ OPENAI_API_KEY: "fixture" }, [], {}, async () => Response.json({ status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output_text: "partial code" }), () => { partialCharged = true; }), error => error.code === "INCOMPLETE_RESPONSE");
+check(!partialCharged, "Truncated replies are rejected before billing or displaying partial code");
 await assert.rejects(() => callOpenAI({ OPENAI_API_KEY: "fixture" }, [], {}, async () => Response.json({ status: "incomplete", output: [] })), (error) => error.code === "INCOMPLETE_RESPONSE");
 check(true, "Empty incomplete replies return actionable errors");
 let networkCalls = 0;

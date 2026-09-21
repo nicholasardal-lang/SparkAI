@@ -55,3 +55,8 @@ assert.ok(!aiInstructions({},false).includes('Technical detail belongs in source
 const scripts=Array.from({length:5},(_,i)=>({name:`Module${i}.luau`,title:`Module ${i}`,type:'ModuleScript',location:'ServerScriptService',source:'return {}'}));
 assert.ok(renderBuild(JSON.stringify({summary:'Detailed technical explanation. '.repeat(70),models:[],scripts,steps:Array(6).fill('Test the module.'),limitation:'Not tested in Studio.'})).includes('Module4'));
 console.log('Adaptive reasoning, contextual routing, quote/dispatch identity, whole-turn token compaction, repeated summaries and expanded response format passed.');
+
+const water = creditQuote({}, [{role:'user',content:'make a flat blue floor with water and add splash effect'}], {});
+assert.equal(water.selection.structuredBuild, true);
+assert.equal(water.selection.complexity, 'coding');
+assert.equal(water.maxOutput, 8192);
