@@ -4,7 +4,7 @@ import { plans, creditPacks, stripePrices } from "./plans.ts";
 import { balance, reserve, settle, stripe, syncSubscription, confirmCheckout } from "./billing.ts";
 import { modelCatalog, modelCredits, selectModel, usageMetrics } from "./models.ts";
 import { artifactInstructions } from "./artifacts.ts";
-import { isBuildRequest, buildFormat, beginnerInstructions, renderBuild, GENERATION_VERSION } from "./generation.ts";
+import { isBuildRequest, buildFormat, beginnerInstructions, generationQualityInstructions, renderBuild, GENERATION_VERSION } from "./generation.ts";
 import { workspacePlacementInstructions } from "./placement.ts";
 import {tokens,turnTokens,planContext,compactConversation,memoryTurn,SUMMARY_TOKENS,SUMMARY_OUTPUT,SUMMARY_INSTRUCTIONS,summaryCandidates,summaryFormat} from './context.ts';
 import type {TaskState} from './models.ts';
@@ -276,9 +276,9 @@ export function creditQuote(env: Partial<Runtime>, context: any[], project: any,
   const desired=selection.complexity==='complex'?24576:selection.complexity==='coding'?8192:2048;
   const configured=Number(env.AI_MAX_OUTPUT_TOKENS);
   const maxOutput=Math.min(desired,Number.isFinite(configured)&&configured>0?Math.max(256,Math.min(32768,configured)):32768);
-  const inputEstimate=tokens(aiInstructions(project,selection.structuredBuild))+context.reduce((n,m)=>n+turnTokens(m),0)+(selection.structuredBuild?tokens(JSON.stringify(buildFormat)):0)+pendingSummaryTokens+128;
+  const inputEstimate=tokens(aiInstructions(project,selection.structuredBuild))+tokens(generationQualityInstructions)+context.reduce((n,m)=>n+turnTokens(m),0)+(selection.structuredBuild?tokens(JSON.stringify(buildFormat)):0)+pendingSummaryTokens+128;
   const expectedOutput=Math.min(maxOutput,selection.complexity==='complex'?8000:selection.complexity==='coding'?2500:500);
-  return {selection,maxOutput,inputEstimate,timeoutMs:selection.complexity==='complex'?180000:selection.complexity==='coding'?120000:60000,maxCredits:modelCredits(selection.model,Math.ceil(inputEstimate*1.15)+128,maxOutput),estimatedCredits:modelCredits(selection.model,inputEstimate,expectedOutput)};
+  return {selection,maxOutput,inputEstimate,timeoutMs:selection.structuredBuild?240000:selection.complexity==='complex'?180000:selection.complexity==='coding'?120000:60000,maxCredits:modelCredits(selection.model,Math.ceil(inputEstimate*1.15)+128,maxOutput),estimatedCredits:modelCredits(selection.model,inputEstimate,expectedOutput)};
 }
 export async function callOpenAI(
   env: Runtime,
@@ -296,6 +296,7 @@ export async function callOpenAI(
   const started = Date.now();
   const structuredBuild = plan.selection.structuredBuild;
   const model = plan.selection.model;
+  let repairFeedback = '';
   for (let attempt = 0; attempt < 3; attempt++) {
     let response: Response;
     let data: any;
@@ -312,7 +313,7 @@ export async function callOpenAI(
           ...(structuredBuild ? {text:{format:buildFormat}} : {}),
           reasoning: { effort: plan.selection.reasoning },
           max_output_tokens: plan.maxOutput,
-          instructions: aiInstructions(project, structuredBuild),
+          instructions: aiInstructions(project, structuredBuild) + '\n' + generationQualityInstructions + repairFeedback,
           input: messages,
           store: false,
         }),
@@ -349,7 +350,16 @@ export async function callOpenAI(
       if (structuredBuild) {
         if(data.status === "incomplete") throw new ApiError(502,"INCOMPLETE_RESPONSE","Spark couldn't finish this build. No Spark Credits were charged. Try a smaller build or retry.");
         try {const rendered=renderBuild(text);onUsage?.(data.usage);return rendered;}
-        catch {throw new ApiError(502,"INVALID_BUILD","Spark couldn't prepare a usable download. No Spark Credits were charged. Please retry with a smaller build.");}
+        catch (error) {
+          if (!repairFeedback && attempt < 2) {
+            // Regenerate from the original request with bounded validator feedback.
+            // Do not append untrusted source or an entire failed build to context.
+            const detail=error instanceof SyntaxError?'Response must be valid JSON matching the build schema.':error instanceof Error?error.message:'Invalid build structure';
+            repairFeedback='\nThe previous build failed application validation: '+detail.slice(0,400)+'. Regenerate the complete deliverable for the original request, correcting this defect and rechecking all files. Return the full schema, not a patch.';
+            continue;
+          }
+          throw new ApiError(502,"INVALID_BUILD","Spark couldn't prepare a usable download after validation. No Spark Credits were charged. Please retry.");
+        }
       }
       if (data.status === "incomplete") throw new ApiError(502, "INCOMPLETE_RESPONSE", "Spark couldn't finish this reply. No Spark Credits were charged. Retry to generate a complete response.");
       onUsage?.(data.usage);
@@ -1073,7 +1083,7 @@ export async function handle(
           console.info("spark_credit_settlement",{requestId:id,model:selectedModel,estimatedCredits:prepared.estimatedCredits,reservedCredits:maximum,chargedCredits:cost,...usageMetrics(selectedModel,usage)});
           await settle(db,user.id,id,parts!,cost,[
             db.prepare('INSERT INTO conversation_memory (project_id,summary,through_id,through_created,task,updated) VALUES (?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET summary=excluded.summary,through_id=excluded.through_id,through_created=excluded.through_created,task=excluded.task,updated=excluded.updated')
-              .bind(project.id,updatedMemory?.summary||prepared.history.memory?.summary||'',updatedMemory?.through_id||prepared.history.memory?.through_id||'',updatedMemory?.through_created||prepared.history.memory?.through_created||0,JSON.stringify({complexity:prepared.selection.complexity,structuredBuild:prepared.selection.structuredBuild}),Date.now()),
+              .bind(project.id,updatedMemory?.summary||prepared.history.memory?.summary||'',updatedMemory?.through_id||prepared.history.memory?.through_id||'',updatedMemory?.through_created||prepared.history.memory?.through_created||0,JSON.stringify({complexity:prepared.selection.complexity,structuredBuild:prepared.selection.structuredBuild,economicalBuild:prepared.selection.economicalBuild}),Date.now()),
             db
               .prepare(
                 "INSERT INTO messages (id,project_id,role,content,created) VALUES (?,?,'assistant',?,?)",

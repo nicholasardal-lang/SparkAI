@@ -8,7 +8,7 @@ export const modelCatalog = {
 } as const;
 export type ModelId = keyof typeof modelCatalog;
 export type ChatTurn = {role:string; content:string};
-export type TaskState = {complexity: "simple"|"coding"|"complex"; structuredBuild:boolean};
+export type TaskState = {complexity: "simple"|"coding"|"complex"; structuredBuild:boolean; economicalBuild?:boolean};
 export function taskState(prompt:string):TaskState {
   // Explicit conceptual questions do not need the implementation route merely
   // because they mention security or DataStore. Length alone is not complexity.
@@ -17,10 +17,16 @@ export function taskState(prompt:string):TaskState {
   const codeBlocks=(prompt.match(/```/g)||[]).length/2;
   const implementation=/\b(?:design|architect|implement|build|create|write|audit|debug|fix|review|secure|refactor|investigate|optimi[sz]e)\b/i.test(prompt);
   const difficult=/\b(?:architecture|race condition|deadlock|data loss|data corruption|exploits?|anti[- ]?cheat|security|multi[- ]?(?:script|file)|cross[- ]server|datastore|data store|inventory system|trading system)\b/i.test(prompt);
+  const course = build && /\b(?:obby|obstacle course)\b/i.test(prompt);
+  const smallCourse = /\b(?:tiny|small|simple|basic|mini|short|beginner)\b/i.test(prompt);
+  const themedCourse = /\b(?:themed?|castle|medieval|dungeon|jungle|space|pirate|volcano|ice|cyberpunk)\b/i.test(prompt);
+  const hazardKinds = ['lava','spikes?','fire','lasers?','moving','falling','traps?'].filter(word => new RegExp('\\b' + word + '\\b', 'i').test(prompt)).length;
+  const designedCourse = course && !smallCourse && (themedCourse || hazardKinds >= 2);
+  const fullExperience = build && !smallCourse && /\b(?:game|vehicle|car|boat|shop|building|house|castle|city|town|map|world)\b/i.test(prompt) && /\b(?:complete|full|detailed|polished|impressive|realistic|driveable|drivable|furnished|interactive)\b/i.test(prompt);
   const multiCode=codeBlocks>=2 && /\b(?:debug|fix|interact|together|error|architecture)\b/i.test(prompt);
   const task=prompt.replace(/\b(?:no|without)\s+(?:code|scripts?|coding)(?:\s+yet)?\b|\b(?:do not|don't)\s+write\s+(?:code|scripts?)(?:\s+yet)?\b/gi, "");
   const coding=build || codeBlocks>0 || /\b(?:code|scripts?|luau|debug|fix|implement|refactor|optimi[sz]e)\b/i.test(task);
-  return {complexity:conceptual?"simple":(implementation&&difficult)||multiCode?"complex":coding?"coding":"simple",structuredBuild:!conceptual&&build};
+  return {complexity:conceptual?"simple":(implementation&&difficult)||multiCode||designedCourse||fullExperience?"complex":coding?"coding":"simple",structuredBuild:!conceptual&&build,economicalBuild:!conceptual&&(designedCourse||fullExperience)&&!(implementation&&difficult)&&!multiCode};
 }
 export function isTaskFollowup(prompt:string) {
   return /^(?:yes|yep|ok(?:ay)?|sure|continue|go ahead|do (?:it|that)|proceed|finish(?: it)?)[.!\s]*$/i.test(prompt.trim()) ||
@@ -44,18 +50,20 @@ export function selectModel(prompt: string, history: ChatTurn[]|number = [], ove
   if(followup) {
     const ranks={simple:0,coding:1,complex:2};
     const proposal=taskState(previousAssistant.replace(/```[\s\S]*?```/g,""));
-    task={complexity:ranks[own.complexity]>ranks[active.complexity]?own.complexity:active.complexity,structuredBuild:own.structuredBuild||active.structuredBuild};
+    task={complexity:ranks[own.complexity]>ranks[active.complexity]?own.complexity:active.complexity,structuredBuild:own.structuredBuild||active.structuredBuild,economicalBuild:own.complexity==='complex'?own.economicalBuild:active.economicalBuild};
     // A specific assistant proposal can raise the follow-up's effort, but a
     // generic explanation of a costly topic cannot raise independent requests.
     if(/\b(?:shall I|would you like|next (?:we|I) can|I can (?:implement|build))\b/i.test(previousAssistant)&&ranks[proposal.complexity]>ranks[task.complexity]) task={...proposal,structuredBuild:task.structuredBuild||proposal.structuredBuild};
   }
-  const reasoning=task.complexity==="complex"?"high":task.complexity==="coding"?"medium":"low";
-  const selected:ModelId=task.complexity==="complex"?"gpt-6-astra":task.complexity==="coding"?"gpt-5.6-terra":"gpt-5-mini";
+  // Rich environments need room for complete code, not automatically the most
+  // expensive model and reasoning tier. Preserve advanced routing for hard logic.
+  const reasoning=task.economicalBuild?"medium":task.complexity==="complex"?"high":task.complexity==="coding"?"medium":"low";
+  const selected:ModelId=task.economicalBuild?"gpt-5.6-terra":task.complexity==="complex"?"gpt-6-astra":task.complexity==="coding"?"gpt-5.6-terra":"gpt-5-mini";
   if (override && override !== "auto") {
     if (!(override in modelCatalog)) throw new Error("Configured model is not in Spark's priced model catalog.");
     return { model: override as ModelId, reason: "Owner-configured model", reasoning, ...task };
   }
-  return {model:selected,reason:followup?"Continuing the active task":task.complexity==="complex"?"Complex implementation or debugging":task.complexity==="coding"?"Focused coding task":"Simple question or planning",reasoning,...task};
+  return {model:selected,reason:followup?"Continuing the active task":task.economicalBuild?"Efficient full build":task.complexity==="complex"?"Complex implementation or debugging":task.complexity==="coding"?"Focused coding task":"Simple question or planning",reasoning,...task};
 }
 export function modelCredits(model: ModelId, inputTokens: number, outputTokens: number, cachedTokens = 0) {
   const rate = modelCatalog[model];

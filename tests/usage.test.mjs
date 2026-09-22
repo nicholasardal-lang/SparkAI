@@ -14,7 +14,9 @@ const context=[{role:'user',content:'Make an obby'},{role:'assistant',content:'x
 const quote=creditQuote({},context,{name:'Test'});
 assert.equal(quote.selection.model,'gpt-5.6-terra');
 assert.ok(quote.estimatedCredits<200);
-assert.ok(quote.maxCredits<300);
+// The quality workflow is included in the quoted input, not hidden from billing.
+assert.equal(quote.maxCredits,modelCredits(quote.selection.model,Math.ceil(quote.inputEstimate*1.15)+128,quote.maxOutput));
+assert.ok(quote.maxCredits<320);
 assert.ok(quote.estimatedCredits<=quote.maxCredits);
 assert.equal(creditQuote({AI_MAX_OUTPUT_TOKENS:'256'},context,{}).estimatedCredits<=quote.estimatedCredits,true);
 console.log('Usage arithmetic, cached-input discounts, reasoning accounting and long-chat quotes passed.');
