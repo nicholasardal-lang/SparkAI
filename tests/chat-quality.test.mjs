@@ -52,6 +52,8 @@ await assert.rejects(()=>compactConversation(plan,'fixture',async()=>Response.js
 await assert.rejects(()=>compactConversation(plan,'fixture',async()=>Response.json({status:'completed',output_text:JSON.stringify({selectedIds:['invented']})}),AbortSignal.timeout(10000),()=>{}),/UNSUPPORTED_SUMMARY_FACT/);
 assert.ok(!aiInstructions({},true).includes('under 120 lines'));
 assert.ok(!aiInstructions({},false).includes('Technical detail belongs in source comments'));
+assert.ok(aiInstructions({},true).includes('never fill Terrain water through a solid Baseplate'));
+assert.ok(aiInstructions({},true).includes('center Y plus or minus half its Size.Y'));
 const scripts=Array.from({length:5},(_,i)=>({name:`Module${i}.luau`,title:`Module ${i}`,type:'ModuleScript',location:'ServerScriptService',source:'return {}'}));
 assert.ok(renderBuild(JSON.stringify({summary:'Detailed technical explanation. '.repeat(70),models:[],scripts,steps:Array(6).fill('Test the module.'),limitation:'Not tested in Studio.'})).includes('Module4'));
 console.log('Adaptive reasoning, contextual routing, quote/dispatch identity, whole-turn token compaction, repeated summaries and expanded response format passed.');

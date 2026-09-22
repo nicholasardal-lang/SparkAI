@@ -6,6 +6,8 @@ const file=modelFile(JSON.stringify(model));
 assert.equal(file.name,'___Test_model.rbxmx');
 assert.ok(file.content.includes('A &amp; &lt;B&gt;'));
 assert.ok(file.content.includes('<bool name="Anchored">true</bool>'));
+const normalizedBlue=modelFile(JSON.stringify({...model,parts:[{...part,color:[0.05,0.35,0.9]}]}));
+assert.ok(normalizedBlue.content.includes('<Color3uint8 name="Color3uint8">4279065062</Color3uint8>'));
 for(const bad of [{...part,shape:'MeshPart'},{...part,rotation:[0,90,0]},{...part,size:[-1,2,3]},{...part,color:[300,0,0]}]) assert.throws(()=>modelFile(JSON.stringify({...model,parts:[bad]})));
 assert.throws(()=>modelFile(JSON.stringify({...model,parts:Array(51).fill(part)})));
 const script=scriptFile('-- Spark file: CoinPickup.client.luau\n-- Spark type: LocalScript\n-- Spark location: StarterPlayer.StarterPlayerScripts\nprint("<ok>&")');
