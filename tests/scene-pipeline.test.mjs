@@ -156,3 +156,4 @@ sqlite.close();
 
 for (const prompt of ['Make a chicken','Create a telescope','Build a helicopter','Make a chandelier','Create a pirate ship','Make a dog not out of bricks','Make a palm tree for my game']) assert.equal(shouldUseAssetStudio(prompt),true,prompt);
 for (const prompt of ['Make a detailed obby','Make a platform','Create a UI menu','Make it jump','Create a story','Make a blocky telescope']) assert.equal(shouldUseAssetStudio(prompt),false,prompt);
+for (const prompt of ['Make a small treasure chest that opens when a player clicks it. Animate the lid and award 10 coins only once.','Create a cat that jumps when a player clicks a button','Build a door that opens when touched','Make a coin that players collect for a reward']) assert.equal(shouldUseAssetStudio(prompt),false,prompt);

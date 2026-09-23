@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import {creditQuote, callOpenAI} from '../lib/spark/core.ts';
+import {selectModel} from '../lib/spark/models.ts';
+const prompt='make a castle themed obby, with lava, spikes, and other dangers';
+const plan=creditQuote({},[{role:'user',content:prompt}],{});
+assert.equal(plan.selection.complexity,'complex');
+assert.equal(plan.selection.structuredBuild,true);
+assert.equal(plan.selection.reasoning,'medium');
+assert.equal(plan.selection.model,'gpt-5.6-terra');
+assert.equal(plan.timeoutMs,240000);
+assert.equal(plan.maxOutput,24576);
+assert.equal(selectModel('continue',[{role:'user',content:prompt}]).complexity,'complex');
+for(const request of ['Make an obby with lava and spikes','Create a jungle themed obby']) assert.equal(selectModel(request).complexity,'complex');
+for(const request of ['Make a tiny castle obby','Make a simple obby with lava and spikes','Write a spike damage script']) assert.equal(selectModel(request).complexity,'coding');
+assert.equal(selectModel('Give me castle obby ideas').complexity,'simple');
+let sent;
+const fixture={summary:'Castle course',models:[],scripts:[{name:'Castle.server.luau',title:'Castle course',type:'Script',location:'ServerScriptService',source:'local stage = 1'}],steps:['Test the route.'],limitation:'Not run in Studio.'};
+await callOpenAI({},[{role:'user',content:prompt}],{},async(_,options)=>{sent=JSON.parse(options.body);return Response.json({output_text:JSON.stringify(fixture)});},undefined,plan);
+assert.equal(sent.max_output_tokens,24576);
+assert.equal(sent.reasoning.effort,'medium');
+assert.ok(sent.instructions.includes('lateral bypasses'));
+assert.ok(sent.instructions.includes('half-extents'));
+assert.ok(!sent.instructions.includes('prefer a compact easy course'));
+console.log('Themed course routing, budget, follow-ups, small-scope exceptions and generation contract passed.');
+
+for(const request of ['Make a detailed furnished house','Create a polished interactive shop','Build a driveable car']) assert.equal(selectModel(request).complexity,'complex');
+assert.equal(selectModel('Make a small detailed house').complexity,'coding');
