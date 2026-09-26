@@ -35,6 +35,23 @@ const localBindingConfig = {
     : [],
 };
 
+const stagingBindingConfig = {
+  ...localBindingConfig,
+  name: "spark-staging",
+  d1_databases: [
+    {
+      binding: "DB",
+      database_name: "spark-staging",
+      database_id: "44eebe4d-d137-4f04-a4d2-4f9db2e8d503",
+    },
+  ],
+  // R2 is added after its subscription and bucket are created in Cloudflare.
+  r2_buckets: [],
+};
+
+const deployToCloudflareStaging =
+  process.env.SPARK_DEPLOY_TARGET === "cloudflare-staging";
+
 export default defineConfig(async () => {
   // Use Miniflare's local Request.cf placeholder unless fetching is requested.
   process.env.CLOUDFLARE_CF_FETCH_ENABLED ??= "false";
@@ -57,12 +74,15 @@ export default defineConfig(async () => {
     },
     plugins: [
       vinext(),
-      sites({ mockAuth: !managedLinux }),
+      ...(deployToCloudflareStaging ? [] : [sites({ mockAuth: !managedLinux })]),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         inspectorPort: false,
-        config: localBindingConfig,
+        config: deployToCloudflareStaging
+          ? stagingBindingConfig
+          : localBindingConfig,
       }),
     ],
   };
 });
+
