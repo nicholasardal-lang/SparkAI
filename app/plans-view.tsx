@@ -57,7 +57,7 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
       <button className="button" onClick={() => signedIn ? setSelection({ planId: plan.id, title: `Spark ${plan.name}`, price: plan.monthly, details: `${plan.credits.toLocaleString("en-US")} credits issued each month` }) : location.assign("/signup")}>Choose {plan.name}</button>
     </article>)}</div>
     <section id="credits" className="topups"><div><h2>A little extra spark.</h2><p>Prefer to start with credits? Buy a pack without a subscription, or top up your plan.</p></div><div className="topup-grid">{creditPacks.map(pack => <button key={pack.name} className="topup-card" onClick={() => signedIn ? setSelection({ packName: pack.name, title: `${pack.name} credit pack`, price: pack.price, details: `${pack.credits.toLocaleString("en-US")} Spark Credits · one-time purchase` }) : location.assign("/signup")}><span>{pack.name}</span><strong>{pack.credits.toLocaleString("en-US")} <small>credits</small></strong><span>${pack.price} <span aria-hidden="true">↗</span></span></button>)}</div></section>
-    <section className="credit-explainer"><h2>Small question. Big build. Credits follow the work.</h2><p>Requests use Spark Credits based on the AI resources they consume. Longer requests, larger conversations, and more involved responses can use more credits. Spark Credits are separate from OpenAI tokens.</p><p>Plan credits refresh monthly, including on yearly plans. Unused plan credits expire at renewal. Purchased credits roll over and do not require an active subscription.</p><p className="notice">Stripe sandbox checkout is active. Sandbox payments are tests and do not move real money. Credit usage rates will be shown before live purchases open.</p></section>
+    <section className="credit-explainer"><h2>Small question. Big build. Credits follow the work.</h2><p>Requests use Spark Credits based on the AI resources they consume. Longer requests, larger conversations, and more involved responses can use more credits. Spark Credits are separate from OpenAI tokens.</p><p>Plan credits refresh monthly, including on yearly plans. Unused plan credits expire at renewal. Purchased credits roll over and do not require an active subscription.</p></section>
     {error && <p className="error" role="alert">{error}</p>}
     <div className="legal-footer"><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a><span>Prices in USD.</span></div>
     <Dialog open={!!selection} onOpenChange={open => { if (!open) { setSelection(null); setError(""); } }}><DialogContent className="checkout-preview"><DialogTitle>{selection?.title}</DialogTitle><DialogDescription>{selection?.details}</DialogDescription>
@@ -67,7 +67,7 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
       </div>}
       <div className="checkout-total"><span>{selectedPlan ? (yearly ? "Annual total" : "Monthly total") : "One-time total"}</span><strong>${checkoutPrice}</strong></div>
       {selectedPlan && yearly && <p className="annual-saving">Save ${selectedPlan.monthly * 12 - selectedPlan.yearly} compared with 12 monthly payments. Credits still arrive monthly.</p>}
-      <p>Stripe opens a secure checkout page. Spark unlocks only after Stripe confirms the sandbox payment.</p>
+      <p>Stripe opens a secure checkout page when payments are available. Spark unlocks only after Stripe confirms payment.</p>
       {error && <p className="error" role="alert">{error}</p>}
       <button className="button" disabled={checkoutBusy} onClick={async () => {
         if (!selection) return;
@@ -82,3 +82,4 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
       <button onClick={() => setSelection(null)}>Back to options</button></DialogContent></Dialog>
   </main>;
 }
+

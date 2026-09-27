@@ -38,6 +38,7 @@ const localBindingConfig = {
 const stagingBindingConfig = {
   ...localBindingConfig,
   name: "spark-staging",
+  vars: { AI_DAILY_BUDGET_USD: "1" },
   d1_databases: [
     {
       binding: "DB",
