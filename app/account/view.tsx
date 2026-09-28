@@ -10,6 +10,7 @@ type Transaction = { id: string; amount: number; source: string; created_at: num
 const sourceLabels: Record<string, string> = {
   subscription_grant: "Monthly plan credits",
   credit_pack: "Credit pack purchase",
+  preview_grant: "Local preview credits",
   ai_usage: "Spark request",
 };
 
@@ -17,7 +18,7 @@ export default function AccountView({ user }: { user: any }) {
   const [tab, setTab] = useState("profile");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [color, setColor] = useState(user.avatar_color || "violet");
+  const [color, setColor] = useState(user.avatar_color === "violet" ? "lime" : user.avatar_color || "lime");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [transactionsLoading, setTransactionsLoading] = useState(false);
 
@@ -65,7 +66,7 @@ export default function AccountView({ user }: { user: any }) {
           <AvatarUpload />
           <label htmlFor="profile-name">Username</label><input id="profile-name" name="username" defaultValue={user.username || ""} required minLength={3} maxLength={24} pattern="[a-zA-Z0-9_]+" />
           <p className="muted">Your email stays private: {user.email}</p>
-          <label>Avatar color</label><div className="avatar-colors">{["violet", "blue", "rose", "green", "amber"].map(c => <button type="button" key={c} className={"profile-avatar " + c} aria-label={c} aria-pressed={color === c} onClick={() => setColor(c)}>{color === c ? "✓" : "✦"}</button>)}</div>
+          <label>Avatar color</label><div className="avatar-colors">{["lime", "blue", "rose", "green", "amber"].map(c => <button type="button" key={c} className={"profile-avatar " + c} aria-label={c} aria-pressed={color === c} onClick={() => setColor(c)}>{color === c ? "✓" : "✦"}</button>)}</div>
           <button className="button" disabled={busy}>Save profile</button>
         </form>}
         {tab === "billing" && <>

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-export default function ProfileAvatar({ username, color = "violet", large = false }: { username?: string; color?: string; large?: boolean }) {
+export default function ProfileAvatar({ username, color = "lime", large = false }: { username?: string; color?: string; large?: boolean }) {
   const [failed, setFailed] = useState(false);
   const [version, setVersion] = useState(0);
   useEffect(() => {

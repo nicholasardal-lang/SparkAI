@@ -115,6 +115,17 @@ check(
   a.status === 200 && b.status === 200,
   "Two independent accounts can sign up",
 );
+env.LOCAL_PREVIEW_CREDITS = "500";
+check((await request("billing/preview", "POST", {}, b.cookie)).status === 404, "Test credits are unavailable away from localhost");
+const previewResponse = await handle(new Request("http://localhost/api/billing/preview", { method: "POST", headers: { Origin: "http://localhost", "Content-Type": "application/json", Cookie: b.cookie }, body: "{}" }), env, fake);
+check(previewResponse.status === 200 && (await previewResponse.json()).credits === 500, "Local preview grants test credits without checkout");
+await handle(new Request("http://localhost/api/billing/preview", { method: "POST", headers: { Origin: "http://localhost", "Content-Type": "application/json", Cookie: b.cookie }, body: "{}" }), env, fake);
+check(sqlite.prepare("SELECT COUNT(*) AS count FROM credit_ledger WHERE user_id=? AND source='preview_grant'").get(b.data.user.id).count === 1, "Local preview grant is idempotent");
+check(!sqlite.prepare("SELECT user_id FROM billing_accounts WHERE user_id=?").get(b.data.user.id), "Local preview creates no subscription record");
+sqlite.prepare("DELETE FROM credit_buckets WHERE user_id=? AND source='preview'").run(b.data.user.id);
+sqlite.prepare("DELETE FROM credit_ledger WHERE user_id=? AND source='preview_grant'").run(b.data.user.id);
+sqlite.prepare("UPDATE users SET workspace_enabled=0 WHERE id=?").run(b.data.user.id);
+delete env.LOCAL_PREVIEW_CREDITS;
 const consent = sqlite.prepare("SELECT legal_version,legal_accepted_at FROM users WHERE email=?").get("one@example.test");
 check(consent.legal_version === LEGAL_VERSION && consent.legal_accepted_at > 0, "Acceptance version and timestamp persist");
 const unverifiedWorkspace = await request("projects", "GET", undefined, a.cookie);

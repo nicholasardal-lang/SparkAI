@@ -3,20 +3,23 @@ import {
   Code2,
   Bug,
   Layers,
-  Sparkles,
   Plus,
   ArrowUp,
   List,
 } from "lucide-react";
 import PreviewComposer from "./preview-composer";
 import SiteNav from "./site-nav";
+import ShootingStars from "./shooting-stars.tsx";
+import GameThumbnailBackdrop from "./game-thumbnail-backdrop";
 export default function Home() {
   return (
     <main>
       <SiteNav />
       <section className="hero">
+        <GameThumbnailBackdrop />
+        <ShootingStars />
         <div className="eyebrow">
-          <Sparkles size={15} /> YOUR NEXT GAME STARTS WITH A SPARK
+          YOUR NEXT GAME STARTS WITH A SPARK
         </div>
         <h1>
           <span>SPARK</span> your

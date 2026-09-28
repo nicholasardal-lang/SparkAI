@@ -114,7 +114,7 @@ export default function Dashboard({ billing }: { billing: any }) {
           <div className="project-grid">
             {projects.map((p) => (
               <article className="project-card" key={p.id}>
-                <Folder color="#A78BFA" size={25} />
+                <Folder color="#46F953" size={25} />
                 <a href={"/projects/" + p.id}>
                   <h2>{p.name}</h2>
                 </a>
@@ -128,7 +128,7 @@ export default function Dashboard({ billing }: { billing: any }) {
                   })}
                 </small>
                 <div className="card-actions">
-                  <a style={{ color: "#A78BFA" }} href={"/projects/" + p.id}>
+                  <a style={{ color: "#77F980" }} href={"/projects/" + p.id}>
                     Open project ↗
                   </a>
                   <button onClick={() => setEditing(p)}>Rename</button>

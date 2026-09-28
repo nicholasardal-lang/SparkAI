@@ -14,6 +14,8 @@ Spark is publicly available at https://spark-roblox-creative-workspace.puriux.ch
 
 Click **Get started**, create an account with a unique username, an email address, and a password of at least 12 characters, and accept the Terms and Privacy drafts. New accounts go to plan selection. Email verification is enabled for new accounts when the hosted Resend settings are configured. Stripe sandbox checkout, subscription management, cancellation, credit grants, and webhook provisioning are implemented in source but require the hosted Stripe secrets and webhook registration. OpenAI billing and a hosted API key are also needed for AI requests. See [Payment preview](docs/PAYMENTS-PREVIEW.md) for the remaining integration work.
 
+For a local no-payment test, set `LOCAL_PREVIEW_CREDITS` to a positive whole number. The upgrade page then offers a one-time test-credit grant per account. The endpoint is restricted to localhost and does not create a Stripe checkout, customer, or subscription.
+
 ## Enable OpenAI safely
 
 1. Create or open an OpenAI API account at https://platform.openai.com/. API usage requires billing credits; a ChatGPT subscription is separate from API usage.

@@ -33,6 +33,7 @@ export type Runtime = {
   REQUIRE_EMAIL_VERIFICATION?: string;
   APP_ORIGIN?: string;
   ADMIN_EMAIL?: string;
+  LOCAL_PREVIEW_CREDITS?: string;
 };
 const encoder = new TextEncoder();
 export class ApiError extends Error {
@@ -154,6 +155,13 @@ function json(data: any, status = 200, extra: Record<string, string> = {}) {
       ...extra,
     },
   });
+}
+function localPreviewCredits(env: Runtime, url: URL) {
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return 0;
+  const credits = Number(env.LOCAL_PREVIEW_CREDITS || 0);
+  return Number.isSafeInteger(credits) && credits > 0
+    ? Math.min(credits, 100_000)
+    : 0;
 }
 function publicSceneJob(job: SceneJob) {
   // Internal leases and large input snapshots are not needed by the browser.
@@ -667,6 +675,18 @@ export async function handle(
     if(path[0]==="billing"&&path[1]==="transactions"&&method==="GET"){
       const rows=(await db.prepare("SELECT id,amount,source,created_at,stripe_reference FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(user.id).all()).results;
       return json({transactions:rows});
+    }
+    if(path[0]==="billing"&&path[1]==="preview"&&method==="POST"){
+      const credits=localPreviewCredits(env,url);
+      if(!credits)fail(404,"NOT_FOUND","Not found.");
+      const reference=`preview:${user.id}`;
+      await db.batch([
+        db.prepare("INSERT INTO credit_buckets (id,user_id,remaining,expires,source) VALUES (?,?,?,NULL,'preview') ON CONFLICT(id) DO NOTHING").bind(reference,user.id,credits),
+        db.prepare("INSERT INTO credit_ledger (id,user_id,amount,source,stripe_reference,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(stripe_reference) DO NOTHING").bind(crypto.randomUUID(),user.id,credits,"preview_grant",reference,Date.now()),
+        db.prepare("UPDATE users SET workspace_enabled=1 WHERE id=?").bind(user.id),
+      ]);
+      const billing=await balance(env,user.id,fetcher);
+      return json({ok:true,credits:billing.credits});
     }
     if(path[0]==="admin"&&path[1]==="metrics"&&method==="GET"){
       if(!env.ADMIN_EMAIL||user.email.toLowerCase()!==env.ADMIN_EMAIL.toLowerCase())fail(403,"FORBIDDEN","Owner monitoring is not enabled for this account.");

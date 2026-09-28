@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./arcade-theme.css";
 export const metadata: Metadata = {
   title: "Spark — SPARK your creativity",
   description: "Turn your ideas into Roblox games with an AI building partner.",

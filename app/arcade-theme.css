@@ -1,0 +1,135 @@
+/* Spark's Arcade Energy theme. */
+@keyframes arcade-star-twinkle {
+  0%, 100% { opacity: .22; filter: brightness(.9); }
+  38% { opacity: .58; filter: brightness(1.8); }
+  61% { opacity: .34; filter: brightness(1.1); }
+  82% { opacity: .78; filter: brightness(2.2); }
+}
+@keyframes arcade-star-drift {
+  to { background-position: 220px 180px, -160px 210px, 140px -90px; }
+}
+@keyframes arcade-enter {
+  from { opacity: 0; translate: 0 12px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+/* Keep the rest of the product in the same black, star-speckled world. */
+body::before {
+  background: var(--background);
+  animation: none;
+}
+body::after {
+  opacity: .26;
+  animation: arcade-star-drift 78s linear infinite, arcade-star-twinkle 11s ease-in-out infinite alternate;
+}
+:focus-visible { outline-color: #46f953; }
+.button {
+  background: #46f953;
+  color: #061007;
+  box-shadow: 0 5px 20px #46f9531c;
+}
+.button:hover {
+  background: #69ff72;
+  box-shadow: 0 8px 26px #46f95345;
+}
+.button.secondary {
+  background: #171d17;
+  border: 1px solid #3b493b;
+  color: #edf5ec;
+  box-shadow: none;
+}
+.button.secondary:hover { border-color: #46f953; color: #46f953; }
+.brand .logo-mark, .footer-logo-mark, .spark-avatar, .eyebrow svg { color: #46f953; }
+.nav-menu-trigger:hover, .nav-menu-trigger[data-state=open] { background: #46f95312; color: #f5f7f0; }
+.nav-menu-item > svg { color: #46f953; }
+.nav-soon { background: #46f95312; color: #b8f8ba; }
+.account-tabs button[aria-pressed=true] { background: #46f953; color: #071008; border-color: #46f953; }
+.account-panel, .billing-summary, .transaction-row, .account-dropdown,
+.quote-card, .features article, .starter-grid button, .pricing-card,
+.plan-card, .preview, .preview-chat, .workspace-main,
+.asset-studio, .project-card, .mini-card {
+  border-color: #303830;
+}
+.project-menu-trigger:hover, .project-menu-trigger:focus-visible { background: #46f95320; color: #eaffeb; }
+.account-tabs button[aria-pressed=true], .starter-grid button:hover,
+.topup-card:hover, .pricing-card:hover, .project-card:hover { border-color: #46f953; }
+.account-page a:not(.button), .billing-summary a, .legal-page a,
+.legal-footer a { color: #77f980; }
+.plans-page .pill, .annual-saving { color: #b8f8ba; }
+.preview-control:hover { background: #46f9531c; border-color: #46f95370; color: #edffed; }
+.preview-composer:focus-within { border-color: #46f953; box-shadow: 0 0 0 3px #46f95320, 0 0 24px #46f95312; }
+.preview-composer button { background: #46f953; color: #061007; }
+.preview-access-card { border-color: #46f95366; background: linear-gradient(135deg,#142316,#111611 72%); }
+.usage-estimate { border-color: #46f95345; background: #46f9530d; color: #b8f8ba; }
+
+.hero { position: relative; isolation: isolate; overflow: hidden; border-radius: 0 0 24px 24px; }
+.hero h1 span { color: #46f953; }
+.hero .eyebrow { color: #b8ffbc; }
+.shooting-star-layer { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; }
+.shooting-star {
+  position: absolute;
+  display: block;
+  width: 82px;
+  height: 2px;
+  border-radius: 999px;
+  transform-origin: center;
+  background: linear-gradient(90deg, transparent, #46f953 76%, #d9ffdc);
+  box-shadow: 0 0 8px #46f953, 0 0 18px #46f95380;
+  opacity: 0;
+  animation: shooting-star-pass 1.15s ease-out both;
+}
+@keyframes shooting-star-pass {
+  0% { opacity: 0; translate: 0 0; }
+  18% { opacity: 1; }
+  72% { opacity: .9; }
+  100% { opacity: 0; translate: 180px 90px; }
+}
+.game-thumbnail-backdrop { position: absolute; z-index: 0; inset: 0; overflow: hidden; pointer-events: none; }
+.hero > :not(.game-thumbnail-backdrop):not(.shooting-star-layer) { position: relative; z-index: 2; }
+.game-thumbnail-card { position: absolute; display: block; width: clamp(210px, 21vw, 285px); aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid #9bea9e66; border-radius: 8px; background: #101510; box-shadow: 0 17px 36px #000a, 0 0 18px #46f95312; opacity: .84; animation: game-thumbnail-float 9s ease-in-out infinite; }
+.game-thumbnail-card img { display: block; width: 100%; height: 100%; object-fit: cover; animation: game-thumbnail-arrive .65s ease both; }
+.game-thumbnail-card-1 { top: 14%; left: max(4%, calc(50% - 650px)); transform: perspective(850px) rotateY(-8deg) rotateX(3deg); }
+.game-thumbnail-card-2 { bottom: 9%; left: max(4%, calc(50% - 650px)); transform: perspective(850px) rotateY(8deg) rotateX(3deg); animation-delay: -2.3s; }
+.game-thumbnail-card-3 { top: 13%; right: max(3%, calc(50% - 625px)); transform: perspective(850px) rotateY(-8deg) rotateX(3deg); animation-delay: -1.4s; }
+.game-thumbnail-card-4 { bottom: 9%; right: max(3%, calc(50% - 625px)); transform: perspective(850px) rotateY(8deg) rotateX(3deg); animation-delay: -3.6s; }
+@keyframes game-thumbnail-float { 0%,100% { translate: 0 0; } 50% { translate: 0 -6px; } }
+@keyframes game-thumbnail-arrive { from { opacity: 0; scale: .98; } to { opacity: 1; scale: 1; } }
+
+/* Motion carries through product pages without competing with the work. */
+.hero > *, .preview, .social-proof-heading, .quotes > *, .section-heading,
+.steps > *, .features > *, .closing-cta > *, .auth-card, .dashboard-heading,
+.dashboard-starters, .project-grid > *, .workspace-main > *, .account-page > *,
+.plans-heading, .plans-grid > *, .legal-page > * {
+  animation: arcade-enter .65s both;
+}
+.quotes > *:nth-child(2), .steps > *:nth-child(2), .features > *:nth-child(2),
+.project-grid > *:nth-child(2), .plans-grid > *:nth-child(2) { animation-delay:.08s; }
+.quotes > *:nth-child(3), .steps > *:nth-child(3), .features > *:nth-child(3),
+.project-grid > *:nth-child(3), .plans-grid > *:nth-child(3) { animation-delay:.16s; }
+.quote-card, .features article, .project-card, .starter-grid button,
+.pricing-card, .plan-card, .button, .account-tabs button {
+  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease, background .22s ease;
+}
+.quote-card:hover, .features article:hover, .project-card:hover,
+.starter-grid button:hover, .pricing-card:hover { transform:translateY(-4px); border-color:#46f95388; box-shadow:0 18px 38px #0006; }
+input, textarea, select { accent-color:#46f953; }
+input:focus, textarea:focus, select:focus { border-color:#46f953; box-shadow:0 0 0 3px #46f95322; }
+
+@media (max-width: 900px) {
+  .game-thumbnail-card { width: clamp(160px, 24vw, 220px); opacity: .72; }
+  .game-thumbnail-card-1 { top: 10%; left: 1%; }
+  .game-thumbnail-card-2 { bottom: 7%; left: 1%; }
+  .game-thumbnail-card-3 { top: 10%; right: 1%; }
+  .game-thumbnail-card-4 { bottom: 7%; right: 1%; }
+}
+@media (max-width: 600px) {
+  .game-thumbnail-card { width: 145px; opacity: .28; }
+  .game-thumbnail-card-1 { top: 8%; left: -38px; }
+  .game-thumbnail-card-2 { bottom: 4%; left: -38px; }
+  .game-thumbnail-card-3 { top: 8%; right: -42px; }
+  .game-thumbnail-card-4 { bottom: 4%; right: -42px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
+  .shooting-star { display: none; }
+}

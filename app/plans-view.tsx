@@ -4,7 +4,7 @@ import { Check, Sparkles } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { plans, creditPacks } from "@/lib/spark/plans";
 import { api } from "./auth-form";
-export default function PlansView({ signedIn = false }: { signedIn?: boolean }) {
+export default function PlansView({ signedIn = false, previewCredits = 0 }: { signedIn?: boolean; previewCredits?: number }) {
   const [yearly, setYearly] = useState(false);
   const [selection, setSelection] = useState<{ title: string; price: number; details: string; planId?: string; packName?: string } | null>(null);
   const selectedPlan = plans.find(plan => plan.id === selection?.planId);
@@ -46,6 +46,7 @@ export default function PlansView({ signedIn = false }: { signedIn?: boolean }) 
   return <main className="plans-page">
     <nav className="plans-nav"><a className="brand" href="/"><span className="logo-mark" aria-hidden="true">✦</span><span>Spark</span></a>{signedIn ? <button onClick={async () => { try { await api("auth/logout", "POST", {}); location.assign("/"); } catch { setError("Could not log out. Please try again."); } }}>Log out</button> : <a href="/login">Log in</a>}</nav>
     {confirmingPayment && <p className="notice" role="status">Checking your payment and unlocking your Spark workspace…</p>}
+    {signedIn && previewCredits > 0 && <section className="preview-access-card" aria-labelledby="preview-access-title"><div><span className="pill">LOCAL TEST PREVIEW</span><h2 id="preview-access-title">Try Spark with {previewCredits.toLocaleString("en-US")} test credits.</h2><p>No purchase, card, or subscription. These credits exist only in this local preview and can be claimed once per account.</p></div><button className="button" disabled={checkoutBusy} onClick={async () => { setCheckoutBusy(true); setError(""); try { await api("billing/preview", "POST", {}); location.assign("/dashboard"); } catch (e: any) { setError(e.message); setCheckoutBusy(false); } }}>{checkoutBusy ? "Opening preview…" : "Start test preview"}</button></section>}
     <header className="plans-heading"><span className="pill">YOUR NEXT CHAPTER</span><h1>Give your ideas room to <span>grow.</span></h1><p>{signedIn ? "Your account is ready. Choose a plan or add credits to unlock Spark." : "Choose the right amount of Spark for the way you build."}</p></header>
     <div className="billing-toggle" role="group" aria-label="Billing frequency"><button aria-pressed={!yearly} onClick={() => setYearly(false)}>Monthly</button><button aria-pressed={yearly} onClick={() => setYearly(true)}>Yearly <span>Save 16.7%</span></button></div>
     <div className="plans-grid">{plans.map(plan => <article key={plan.id} className={"pricing-card " + (plan.id === "creator" ? "recommended" : "")}>
