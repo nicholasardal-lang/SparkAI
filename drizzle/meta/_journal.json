@@ -64,6 +64,14 @@
       "when": 1789620000000,
       "tag": "0008_scene_asset_pipeline",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790380800000,
+      "tag": "0009_ai_budget",
+      "breakpoints": true
     }
   ]
 }
+

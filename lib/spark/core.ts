@@ -14,6 +14,7 @@ import { sceneInstaller } from './scenes.ts';
 import { shouldUseAssetStudio, assetStudioGuidance } from './scene-intent.ts';
 import { searchCreatorStore } from './creator-store.ts';
 import {MODEL_OPTIONS_PREFIX,readModelOptions,modelSearchTerms} from './model-options.ts';
+import { budgetedProviderFetch, ProviderBudgetError } from './provider-budget.ts';
 export type DB = {
   prepare(sql: string): any;
   batch(statements: any[]): Promise<any>;
@@ -26,6 +27,7 @@ export type Runtime = {
   OPENAI_MODEL?: string;
   DAILY_MESSAGE_LIMIT?: string;
   AI_MAX_OUTPUT_TOKENS?: string;
+  AI_DAILY_BUDGET_USD?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   RESEND_API_KEY?: string;
@@ -321,6 +323,7 @@ export async function callOpenAI(
       });
       data = await response.json();
     } catch (error) {
+      if (error instanceof ProviderBudgetError) throw new ApiError(429, "AI_DAILY_BUDGET", error.message);
       const timedOut = signal.aborted || (error instanceof Error && error.name === "TimeoutError");
       console.warn("spark_ai_failure", { model, elapsedMs: Date.now() - started, attempt: attempt + 1, code: timedOut ? "AI_TIMEOUT" : "NETWORK_ERROR" });
       throw new ApiError(
@@ -390,6 +393,7 @@ export async function handle(
         "STORAGE_UNAVAILABLE",
         "Storage is unavailable. Please try again later.",
       );
+    const providerFetch = budgetedProviderFetch(db, env.AI_DAILY_BUDGET_USD, fetcher);
     const url = new URL(req.url);
     const path = url.pathname.replace(/^\/api\/?/, "").split("/");
     const method = req.method;
@@ -884,7 +888,7 @@ export async function handle(
               await settle(db,user.id,reservationId,parts!,0);parts=undefined;
               return json({job:publicSceneJob(claimed),duplicate:true});
             }
-            const result=await planScene(env,project,claimed.prompt,claimed.assets,fetcher,AbortSignal.timeout(240000));
+            const result=await planScene(env,project,claimed.prompt,claimed.assets,providerFetch,AbortSignal.timeout(240000));
             const completion=await prepareSceneCompletion(db,project.id,job.id,result.plan,claimed.leaseToken!);
             await settle(db,user.id,reservationId,parts!,result.credits,completion.statements);
             parts=undefined;
@@ -1070,14 +1074,14 @@ export async function handle(
             let input=context;
             if(prepared.history.batches.length) {
               try {
-                updatedMemory=await compactConversation(prepared.history,env.OPENAI_API_KEY!,fetcher,overallSignal,u=>{
+                updatedMemory=await compactConversation(prepared.history,env.OPENAI_API_KEY!,providerFetch,overallSignal,u=>{
                   summaryCost+=modelCredits('gpt-5-mini',Number(u.input_tokens)||0,Number(u.output_tokens)||0,Number(u.input_tokens_details?.cached_tokens)||0);
                   console.info('spark_context_compaction',{requestId:id,...usageMetrics('gpt-5-mini',u)});
                 });
-              } catch {fail(503,'CONTEXT_SUMMARY_FAILED','Spark could not safely update the conversation notes. Your history is preserved and no Spark Credits were charged. Please retry.');}
+              } catch (error) {if(error instanceof ProviderBudgetError)fail(429,'AI_DAILY_BUDGET',error.message);fail(503,'CONTEXT_SUMMARY_FAILED','Spark could not safely update the conversation notes. Your history is preserved and no Spark Credits were charged. Please retry.');}
               input=[memoryTurn(updatedMemory.summary),...prepared.history.recent.map(({role,content}:any)=>({role,content})),{role:'user',content}];
             }
-            answer=await callOpenAI(env,input,project,fetcher,u=>{usage=u;},prepared,overallSignal);}
+            answer=await callOpenAI(env,input,project,providerFetch,u=>{usage=u;},prepared,overallSignal);}
           catch(e){await settle(db,user.id,id,parts!,0);throw e;}
           const cost=Math.min(maximum,summaryCost+modelCredits(selectedModel,Number(usage?.input_tokens)||prepared.inputEstimate,Number(usage?.output_tokens)||tokens(answer),Number(usage?.input_tokens_details?.cached_tokens)||0));
           console.info("spark_credit_settlement",{requestId:id,model:selectedModel,estimatedCredits:prepared.estimatedCredits,reservedCredits:maximum,chargedCredits:cost,...usageMetrics(selectedModel,usage)});
@@ -1132,3 +1136,4 @@ export async function handle(
     );
   }
 }
+

@@ -2,6 +2,7 @@ import { tokens } from "./context.ts";
 import { modelCatalog, modelCredits, type ModelId } from "./models.ts";
 import { sceneToolSchema, validateScene, type LibraryAsset, type ScenePlan } from "./scenes.ts";
 import { shouldUseAssetStudio } from "./scene-intent.ts";
+import { ProviderBudgetError } from "./provider-budget.ts";
 
 // Only local, read-only retrieval and a validated proposal. No provider-side
 // browsing, arbitrary code, purchases, uploads, or Studio execution is exposed.
@@ -97,7 +98,8 @@ export async function planScene(
           store: false, include: ["reasoning.encrypted_content"] }), signal,
       });
       data = await response.json();
-    } catch {
+    } catch (error) {
+      if (error instanceof ProviderBudgetError) throw new ScenePlannerError(429, "AI_DAILY_BUDGET", error.message);
       throw new ScenePlannerError(signal.aborted ? 504 : 503, signal.aborted ? "SCENE_TIMEOUT" : "NETWORK_ERROR",
         "Planning was interrupted; it was not automatically resubmitted. No Spark Credits were charged. Review the saved job before retrying.");
     }
@@ -149,3 +151,4 @@ export async function planScene(
   }
   throw new ScenePlannerError(502, "INVALID_SCENE", "The scene could not pass validation within three tool turns. No Spark Credits were charged. Try a smaller scene.");
 }
+

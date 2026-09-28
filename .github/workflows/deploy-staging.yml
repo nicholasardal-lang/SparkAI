@@ -1,0 +1,52 @@
+name: Deploy Spark staging
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/cloudflare-staging
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spark-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: spark-staging
+    env:
+      SPARK_DEPLOY_TARGET: cloudflare-staging
+      CLOUDFLARE_ACCOUNT_ID: 3ac4fbbc9d9134734e4ddd5bd449d0e1
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Check types
+        run: npx tsc --noEmit
+      - name: Build staging Worker
+        run: npm run build
+      - name: Check Cloudflare credential
+        shell: bash
+        run: |
+          if [[ -z "$CLOUDFLARE_API_TOKEN" ]]; then
+            echo 'Add CLOUDFLARE_API_TOKEN to the spark-staging GitHub environment.' >&2
+            exit 1
+          fi
+      - name: Deploy staging Worker
+        run: npx wrangler deploy --no-bundle --config dist/server/wrangler.json
+      - name: Check staging health
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 \
+            https://spark-staging.nicholasardal.workers.dev/api/health \
+            | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { const health = JSON.parse(s); if (health.ok !== true) process.exit(1); console.log("Staging health OK"); });'
+
