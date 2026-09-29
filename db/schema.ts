@@ -144,3 +144,14 @@ export const authTokens=sqliteTable("auth_tokens",{
   userId:text("user_id").notNull().references(()=>users.id,{onDelete:"cascade"}),
   purpose:text("purpose").notNull(),expires:integer("expires").notNull(),createdAt:integer("created_at").notNull(),usedAt:integer("used_at"),
 },t=>[index("auth_tokens_user_purpose").on(t.userId,t.purpose,t.expires)]);
+export const studioConnections=sqliteTable('studio_connections',{
+  projectId:text('project_id').primaryKey().references(()=>projects.id,{onDelete:'cascade'}),
+  codeHash:text('code_hash').unique(),codeExpires:integer('code_expires').notNull().default(0),
+  tokenHash:text('token_hash').unique(),tokenExpires:integer('token_expires').notNull().default(0),
+  placeId:text('place_id'),lastSeen:integer('last_seen'),
+});
+export const studioTransfers=sqliteTable('studio_transfers',{
+  id:text('id').primaryKey(),projectId:text('project_id').notNull().references(()=>projects.id,{onDelete:'cascade'}),
+  fingerprint:text('fingerprint').notNull(),payload:text('payload').notNull(),
+  status:text('status').notNull().default('pending'),created:integer('created').notNull(),expires:integer('expires').notNull(),
+},t=>[uniqueIndex('studio_transfers_fingerprint').on(t.projectId,t.fingerprint),index('studio_transfers_project').on(t.projectId,t.created),check('studio_transfers_status',sql`${t.status} IN ('pending','applied','rejected')`)]);

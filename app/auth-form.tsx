@@ -53,7 +53,11 @@ export default function AuthForm({ signup = false }: { signup?: boolean }) {
               ...(signup ? { acceptedLegal: accepted, legalVersion: LEGAL_VERSION } : {}),
             });
             const next = new URLSearchParams(window.location.search).get("next");
-            if(result.needsVerification) window.location.assign("/verify-email");
+            if(result.needsVerification) {
+              window.sessionStorage.setItem("sparkPendingVerificationEmail", String(data.get("email") || ""));
+              window.sessionStorage.setItem("sparkVerificationSent", String(!!result.verificationSent));
+              window.location.assign("/verify-email");
+            }
             else window.location.assign(signup || next === "/upgrade" ? "/upgrade" : "/dashboard");
           } catch (e: any) {
             setError(e.message);

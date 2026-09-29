@@ -64,6 +64,13 @@
       "when": 1789620000000,
       "tag": "0008_scene_asset_pipeline",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789700000000,
+      "tag": "0009_studio_bridge",
+      "breakpoints": true
     }
   ]
 }

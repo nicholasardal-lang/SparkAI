@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { LEGAL_VERSION } from "../lib/spark/legal.ts";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { handle, providerError, callOpenAI } from "../lib/spark/core.ts";
+import { handle, providerError, callOpenAI, prepareAI } from "../lib/spark/core.ts";
 import { balance, syncSubscription, reserve, settle, monthAt } from "../lib/spark/billing.ts";
 import { selectModel, modelCredits } from "../lib/spark/models.ts";
 const sqlite = new DatabaseSync(":memory:");
@@ -43,9 +43,10 @@ const DB = {
     }
   },
 };
-let env = { DB, REQUIRE_EMAIL_VERIFICATION: "true" };
+let env = { DB, REQUIRE_EMAIL_VERIFICATION: "true", RESEND_API_KEY: "test-only", EMAIL_FROM: "Spark <test@example.test>", APP_ORIGIN: "https://spark.test" };
 let calls = 0;
 const fake = async (url, options) => {
+  if (url === "https://api.resend.com/emails") return Response.json({ id: "fixture" });
   calls++;
   const payload = JSON.parse(options.body);
   assert.equal(payload.model, "gpt-5-mini");
@@ -216,6 +217,10 @@ check((await request(`projects/${id}/model-options`,'PATCH',{messageId:optionReq
 check((await request(`projects/${id}/model-options`,'PATCH',{messageId:optionRequest.requestId+':models',assetId:'123'},b.cookie)).status===404,'Model selection enforces project ownership');
 check((await request(`projects/${id}/model-options`,'PATCH',{messageId:optionRequest.requestId+':models',assetId:'123'},a.cookie)).status===200,'User can choose a suggested model');
 check(sqlite.prepare('SELECT content FROM messages WHERE id=?').get(optionRequest.requestId+':models').content.includes('"selectedId":"123"'),'Model selection persists on reload');
+const modelFollowup=await prepareAI({DB}, {id,name:'Test',description:''},'Make it red');
+check(modelFollowup.context.some(m=>m.role==='user'&&m.content==='Make a dog'),'AI context retains original model request');
+check(modelFollowup.context.some(m=>m.content.includes('"selected":{"id":"123"')),'AI context includes selected model identity');
+check(!modelFollowup.context.some(m=>m.content.startsWith('SPARK_MODEL_OPTIONS_V1')),'AI context removes raw catalog payloads');
 sqlite.prepare('DELETE FROM messages WHERE project_id=?').run(id);
 check((await request(`projects/${id}/creator-store?q=dog`,"GET",undefined,b.cookie)).status===404,"Creator Store search enforces project ownership");
 check((await request(`projects/${id}/creator-store?q=`,"GET",undefined,a.cookie)).status===400,"Creator Store search rejects empty queries");

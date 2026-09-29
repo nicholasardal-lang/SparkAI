@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {shouldUseAssetStudio} from '../lib/spark/scene-intent.ts';
+import {modelSearchTerms,modelContext,MODEL_OPTIONS_PREFIX} from '../lib/spark/model-options.ts';
+for(const prompt of ['Make it red','Make that bigger','Make the selected car faster','Animate this dog','Write a dog movement script','Create an obby with checkpoints'])assert.equal(shouldUseAssetStudio(prompt),false,prompt);
+for(const prompt of ['Make a realistic dog with a movement script','Create a car that follows the player','Make a house and add a door script'])assert.equal(shouldUseAssetStudio(prompt),true,prompt);
+assert.equal(modelSearchTerms('Make a car that follows the player'),'car');
+assert.equal(modelSearchTerms('Make a dog with a movement script'),'dog');
+const raw=MODEL_OPTIONS_PREFIX+JSON.stringify({query:'dog',originalRequest:'Make a dog that follows me',selectedId:'123',models:[{id:'123',name:'Dog',scriptCount:0,thumbnail:'unused'}]});
+assert.ok(modelContext(raw).includes('Make a dog that follows me'));
+assert.ok(modelContext(raw).includes('NOT been inspected'));
+assert.ok(!modelContext(raw).includes('thumbnail'));
+assert.equal(modelContext('ordinary chat'),'ordinary chat');
+console.log('Mixed requests, contextual edits and selected-model context passed.');

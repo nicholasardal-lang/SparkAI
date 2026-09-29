@@ -2,17 +2,19 @@
 import {useState} from 'react';
 import {api} from '../../auth-form';
 import type {ModelOptions} from '@/lib/spark/model-options';
-export default function ModelChoices({options,projectId,messageId}:{options:ModelOptions;projectId:string;messageId:string}){
+export default function ModelChoices({options,projectId,messageId,onCustomize}:{options:ModelOptions;projectId:string;messageId:string;onCustomize?:(prompt:string)=>void}){
  const [selected,setSelected]=useState(options.selectedId);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
  const choice=options.models.find(m=>m.id===selected);
  return <div className="model-choices">
-  <p>{options.models.length?'Here are a few free Roblox models we can use. Which one do you like?':'I couldn’t find a free model matching that description. Try describing the object more simply, such as “make a dog”.'}</p>
+  <p>{options.models.length?'Here are some options for your build. Which one do you like?':'I couldn’t find a matching model. Try describing the object more simply, such as “make a dog”.'}</p>
   <div className="creator-results">{options.models.map(model=><div className="creator-result" key={model.id}>
    {model.thumbnail&&<img src={model.thumbnail} alt={model.name} loading="lazy" referrerPolicy="no-referrer"/>}
    <h4>{model.name}</h4><p>{model.scriptCount===null?'Scripts not checked':model.scriptCount===0?'No scripts reported':`${model.scriptCount} scripts reported`}</p>
+   <details><summary>Model details</summary><p>By {model.creator}. Sourced from the Roblox Creator Store.</p><a href={model.url} target="_blank" rel="noopener noreferrer">View original model ↗</a></details>
    <button className="asset-secondary" disabled={busy} aria-pressed={selected===model.id} onClick={async()=>{setBusy(true);setError('');try{await api(`projects/${projectId}/model-options`,'PATCH',{messageId,assetId:model.id});setSelected(model.id);}catch(e){setError(e instanceof Error?e.message:'Could not save selection.');}finally{setBusy(false);}}}>{selected===model.id?'Selected':'Choose this one'}</button>
   </div>)}</div>
   {error&&<p className="error" role="alert">{error}</p>}
+  {choice&&onCustomize&&<p><button className="asset-secondary" onClick={()=>onCustomize(`Using the selected model, write the customization or behavior scripts needed for this request: ${options.originalRequest||options.query}. Preserve the selected base model. If no changes were requested, ask what I want to customize.`)}>Customize this model</button></p>}
   {choice&&<div className="notice" role="status"><strong>{choice.name} selected.</strong><p><button className="asset-secondary" disabled={busy} onClick={async()=>{
     setBusy(true);setError('');try{
       const response=await fetch(`/api/projects/${projectId}/model-download`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messageId,assetId:choice.id})});

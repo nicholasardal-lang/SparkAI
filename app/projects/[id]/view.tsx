@@ -22,6 +22,7 @@ import { api } from "../../auth-form";
 import ProjectActions from "../../project-actions";
 import AssetStudio from "./asset-studio";
 import ModelChoices from "./model-options";
+import StudioConnect, {StudioSend} from './studio-connect';
 import {readModelOptions} from "@/lib/spark/model-options";
 import { shouldUseAssetStudio } from "@/lib/spark/scene-intent";
 import { readIdea, clearIdea } from "@/lib/spark/draft";
@@ -273,10 +274,7 @@ export default function Workspace({ id }: { id: string }) {
           </div>
         </SidebarContent>
         <SidebarFooter className="p-5">
-          <p className="muted">Live Roblox Studio connection</p>
-          <span className="pill" style={{ width: "fit-content" }}>
-            Coming soon
-          </span>
+          <StudioConnect projectId={id}/>
         </SidebarFooter>
       </Sidebar>
       <main className="workspace-main">
@@ -338,7 +336,8 @@ export default function Workspace({ id }: { id: string }) {
                 {m.role === "assistant" ? (
                   <>
                     <b>✦ Spark</b>
-                    {readModelOptions(m.content) ? <ModelChoices options={readModelOptions(m.content)!} projectId={id} messageId={m.id}/> : <Markdown text={m.content} />}
+                    {readModelOptions(m.content) ? <ModelChoices options={readModelOptions(m.content)!} projectId={id} messageId={m.id} onCustomize={prompt=>{setDraft(prompt);setRetry(null);document.getElementById("message")?.focus();}}/> : <Markdown text={m.content} />}
+                    {(extractFiles(m.content).length>0||readModelOptions(m.content))&&<StudioSend projectId={id} messageId={m.id}/>}
                   </>
                 ) : (
                   <>{m.content}{!busy && data.requests?.some((r:any)=>r.id===m.id) && <div className="notice" style={{marginTop:12}}><span>Spark hasn’t completed this reply.</span>{" "}<button onClick={()=>editFailed({content:m.content,requestId:m.id})}>Edit and send again</button></div>}</>
