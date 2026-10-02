@@ -1,0 +1,9 @@
+{
+  "name": "spark-recovery-drill",
+  "account_id": "3ac4fbbc9d9134734e4ddd5bd449d0e1",
+  "d1_databases": [{
+    "binding": "RECOVERY",
+    "database_name": "spark-recovery-drill",
+    "database_id": "27b9e5f6-ef2d-4cd1-ab1e-82398d2dc07b"
+  }]
+}

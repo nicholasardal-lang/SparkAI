@@ -1,0 +1,22 @@
+{
+  "name": "spark-production",
+  "account_id": "3ac4fbbc9d9134734e4ddd5bd449d0e1",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "no_bundle": true,
+  "rules": [{ "type": "ESModule", "globs": ["**/*.js", "**/*.mjs"] }],
+  "assets": { "directory": "dist/client" },
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spark-production",
+      "database_id": "599871d7-f879-4712-85f2-25f2a407f082",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "spark-production-assets" }]
+}
